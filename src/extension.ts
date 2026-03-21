@@ -5,6 +5,7 @@ import {
 	isEditToolResult,
 	isWriteToolResult,
 } from "@mariozechner/pi-coding-agent";
+import { loadCodeIntelConfig } from "./config.js";
 import { loadLspConfig } from "./lsp/config.js";
 import { LspClientManager } from "./lsp/client.js";
 import { createLspTool } from "./lsp/tool.js";
@@ -21,77 +22,98 @@ import { buildCodeIntelPrompt } from "./prompt/system-prompt.js";
  */
 const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	const cwd = process.cwd();
+	const config = loadCodeIntelConfig(cwd);
+	const cleanupFns: Array<() => Promise<void>> = [];
 
 	// 1. LSP subsystem
-	const lspConfig = loadLspConfig(cwd);
-	const lspManager = new LspClientManager(lspConfig, cwd);
-	const lspTool = createLspTool(lspManager, cwd);
-	pi.registerTool(lspTool);
+	let lspManager: LspClientManager | null = null;
+	if (config.lsp.enabled) {
+		const lspConfig = loadLspConfig(cwd);
+		lspManager = new LspClientManager(lspConfig, cwd);
+		const lspTool = createLspTool(lspManager, cwd);
+		pi.registerTool(lspTool);
+		cleanupFns.push(() => lspManager!.shutdown());
+	}
 
 	// 2. Semantic search subsystem
-	const semvex = new SemvexProcess(cwd);
-	const [searchCodeTool, searchDocsTool] = createSearchTools(semvex);
-	pi.registerTool(searchCodeTool);
-	pi.registerTool(searchDocsTool);
+	if (config.search.enabled) {
+		const semvex = new SemvexProcess(cwd, config.search.command);
+		const [searchCodeTool, searchDocsTool] = createSearchTools(semvex);
+		pi.registerTool(searchCodeTool);
+		pi.registerTool(searchDocsTool);
+		cleanupFns.push(() => semvex.shutdown());
+	}
 
 	// 3. Sub-agent subsystem
-	// Collect all custom tools registered so sub-agents can access them
-	// ToolDefinition generic variance requires casting for mixed schema types
-	const customTools = [
-		lspTool,
-		searchCodeTool,
-		searchDocsTool,
-	] as unknown as ToolDefinition[];
-	const agentTool = createAgentTool(customTools);
-	pi.registerTool(agentTool);
+	if (config.agents.enabled) {
+		// Pass custom tool definitions so sub-agents can access them via createAgentSession
+		const registeredCustomTools: ToolDefinition[] = [];
+		// Re-create tools for sub-agent injection (they need fresh instances)
+		if (config.lsp.enabled && lspManager) {
+			registeredCustomTools.push(
+				createLspTool(lspManager, cwd) as unknown as ToolDefinition,
+			);
+		}
+		if (config.search.enabled) {
+			const semvexForAgents = new SemvexProcess(cwd, config.search.command);
+			const [sc, sd] = createSearchTools(semvexForAgents);
+			registeredCustomTools.push(sc as unknown as ToolDefinition);
+			registeredCustomTools.push(sd as unknown as ToolDefinition);
+			cleanupFns.push(() => semvexForAgents.shutdown());
+		}
+		const agentTool = createAgentTool(registeredCustomTools);
+		pi.registerTool(agentTool);
+	}
 
 	// 4. System prompt injection
-	pi.on("before_agent_start", (event) => {
-		const activeToolNames = pi.getActiveTools();
+	if (config.prompt.enabled) {
+		pi.on("before_agent_start", (event) => {
+			const activeToolNames = pi.getActiveTools();
 
-		const prompt = buildCodeIntelPrompt({
-			hasLsp: activeToolNames.includes("lsp"),
-			hasSearch: activeToolNames.includes("search_code"),
-			hasAgent: activeToolNames.includes("agent"),
+			const prompt = buildCodeIntelPrompt({
+				hasLsp: activeToolNames.includes("lsp"),
+				hasSearch: activeToolNames.includes("search_code"),
+				hasAgent: activeToolNames.includes("agent"),
+			});
+
+			if (prompt) {
+				return {
+					systemPrompt: (event.systemPrompt ?? "") + prompt,
+				};
+			}
+			return {};
 		});
-
-		if (prompt) {
-			return {
-				systemPrompt: (event.systemPrompt ?? "") + prompt,
-			};
-		}
-		return {};
-	});
+	}
 
 	// 5. Format-on-write: sync files with LSP after edit/write operations
-	pi.on("tool_result", (event) => {
-		if (event.isError) return;
+	if (lspManager) {
+		const manager = lspManager;
+		pi.on("tool_result", (event) => {
+			if (event.isError) return;
 
-		let filePath: string | undefined;
-		if (isEditToolResult(event)) {
-			filePath = (event.input as { path?: string }).path;
-		} else if (isWriteToolResult(event)) {
-			filePath = (event.input as { path?: string }).path;
-		}
+			let filePath: string | undefined;
+			if (isEditToolResult(event)) {
+				filePath = (event.input as { path?: string }).path;
+			} else if (isWriteToolResult(event)) {
+				filePath = (event.input as { path?: string }).path;
+			}
 
-		if (filePath) {
-			// Sync the modified file with all active LSP servers
-			// This triggers diagnostics updates without blocking the tool result
-			lspManager.getClientForFile(filePath).then((client) => {
-				if (client) {
-					lspManager.syncFile(client, filePath!).catch(() => {
-						// Silently ignore sync errors
-					});
-				}
-			}).catch(() => {
-				// No server available — ignore
-			});
-		}
-	});
+			if (filePath) {
+				manager
+					.getClientForFile(filePath)
+					.then((client) => {
+						if (client) {
+							manager.syncFile(client, filePath!).catch(() => {});
+						}
+					})
+					.catch(() => {});
+			}
+		});
+	}
 
 	// 6. Cleanup on shutdown
 	pi.on("session_shutdown", async () => {
-		await Promise.allSettled([lspManager.shutdown(), semvex.shutdown()]);
+		await Promise.allSettled(cleanupFns.map((fn) => fn()));
 	});
 };
 

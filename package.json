@@ -3,15 +3,21 @@
 	"version": "0.1.0",
 	"description": "Pi coding agent extension: LSP, sub-agents, semantic search, code intelligence workflow",
 	"type": "module",
-	"keywords": ["pi-package"],
+	"keywords": [
+		"pi-package"
+	],
 	"main": "./dist/extension.js",
 	"pi": {
-		"extensions": ["./dist/extension.js"]
+		"extensions": [
+			"./dist/extension.js"
+		]
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && node --experimental-strip-types scripts/copy-assets.ts",
 		"dev": "tsc -p tsconfig.build.json --watch",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"peerDependencies": {
 		"@mariozechner/pi-coding-agent": ">=0.60.0"
@@ -19,8 +25,9 @@
 	"devDependencies": {
 		"@mariozechner/pi-coding-agent": "^0.61.1",
 		"@sinclair/typebox": "^0.34.0",
+		"@types/node": "^22.0.0",
 		"typescript": "^5.7.3",
-		"@types/node": "^22.0.0"
+		"vitest": "^4.1.0"
 	},
 	"engines": {
 		"node": ">=20.6.0"
