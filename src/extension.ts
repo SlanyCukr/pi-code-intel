@@ -12,7 +12,7 @@ import { createLspTool } from "./lsp/tool.js";
 import { createAgentTool } from "./agents/tool.js";
 import { createSearchTools } from "./search/tool.js";
 import { SemvexProcess } from "./search/process.js";
-import { buildCodeIntelPrompt } from "./prompt/system-prompt.js";
+import { buildSystemPrompt } from "./prompt/system-prompt.js";
 
 /**
  * Pi extension entry point.
@@ -65,23 +65,31 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		pi.registerTool(agentTool);
 	}
 
-	// 4. System prompt injection
+	// 4. System prompt — fully replace pi's default
 	if (config.prompt.enabled) {
 		pi.on("before_agent_start", (event) => {
 			const activeToolNames = pi.getActiveTools();
 
-			const prompt = buildCodeIntelPrompt({
-				hasLsp: activeToolNames.includes("lsp"),
-				hasSearch: activeToolNames.includes("search_code"),
-				hasAgent: activeToolNames.includes("agent"),
-			});
-
-			if (prompt) {
-				return {
-					systemPrompt: (event.systemPrompt ?? "") + prompt,
-				};
+			// Collect tool snippets from registered tools
+			const allToolInfo = pi.getAllTools();
+			const toolSnippets: Record<string, string> = {};
+			for (const tool of allToolInfo) {
+				if (tool.description) {
+					// Use first line of description as snippet
+					toolSnippets[tool.name] = tool.description.split("\n")[0];
+				}
 			}
-			return {};
+
+			return {
+				systemPrompt: buildSystemPrompt({
+					hasLsp: activeToolNames.includes("lsp"),
+					hasSearch: activeToolNames.includes("search_code"),
+					hasAgent: activeToolNames.includes("agent"),
+					activeTools: activeToolNames,
+					toolSnippets,
+					piSystemPrompt: event.systemPrompt ?? "",
+				}),
+			};
 		});
 	}
 

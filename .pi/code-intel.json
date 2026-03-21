@@ -1,0 +1,6 @@
+{
+  "search": {
+    "enabled": true,
+    "command": ".pi/semvex-launch.sh"
+  }
+}
