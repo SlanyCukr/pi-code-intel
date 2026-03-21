@@ -1,0 +1,237 @@
+{
+	"typescript-language-server": {
+		"command": "typescript-language-server",
+		"args": ["--stdio"],
+		"fileTypes": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+		"rootMarkers": ["tsconfig.json", "jsconfig.json", "package.json"],
+		"initOptions": {
+			"preferences": {
+				"includeInlayParameterNameHints": "none",
+				"includeInlayPropertyDeclarationTypeHints": false,
+				"includeInlayFunctionLikeReturnTypeHints": false
+			}
+		}
+	},
+	"pyright": {
+		"command": "pyright-langserver",
+		"args": ["--stdio"],
+		"fileTypes": [".py", ".pyi"],
+		"rootMarkers": ["pyproject.toml", "setup.py", "pyrightconfig.json", "requirements.txt"],
+		"settings": {
+			"python": {
+				"analysis": {
+					"autoSearchPaths": true,
+					"useLibraryCodeForTypes": true,
+					"diagnosticMode": "workspace"
+				}
+			}
+		}
+	},
+	"rust-analyzer": {
+		"command": "rust-analyzer",
+		"args": [],
+		"fileTypes": [".rs"],
+		"rootMarkers": ["Cargo.toml"],
+		"settings": {
+			"rust-analyzer": {
+				"checkOnSave": { "command": "clippy" },
+				"diagnostics": { "enable": true }
+			}
+		}
+	},
+	"gopls": {
+		"command": "gopls",
+		"args": ["serve"],
+		"fileTypes": [".go"],
+		"rootMarkers": ["go.mod", "go.sum"],
+		"settings": {
+			"gopls": {
+				"analyses": { "unusedparams": true },
+				"staticcheck": true
+			}
+		}
+	},
+	"clangd": {
+		"command": "clangd",
+		"args": ["--background-index"],
+		"fileTypes": [".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hh"],
+		"rootMarkers": ["compile_commands.json", "CMakeLists.txt", ".clangd", "Makefile"]
+	},
+	"lua-language-server": {
+		"command": "lua-language-server",
+		"args": [],
+		"fileTypes": [".lua"],
+		"rootMarkers": [".luarc.json", ".luarc.jsonc"]
+	},
+	"zls": {
+		"command": "zls",
+		"args": [],
+		"fileTypes": [".zig"],
+		"rootMarkers": ["build.zig", "build.zig.zon"]
+	},
+	"jdtls": {
+		"command": "jdtls",
+		"args": [],
+		"fileTypes": [".java"],
+		"rootMarkers": ["pom.xml", "build.gradle", "build.gradle.kts", ".project"]
+	},
+	"kotlin-language-server": {
+		"command": "kotlin-language-server",
+		"args": [],
+		"fileTypes": [".kt", ".kts"],
+		"rootMarkers": ["build.gradle", "build.gradle.kts", "pom.xml"]
+	},
+	"omnisharp": {
+		"command": "omnisharp",
+		"args": ["-lsp"],
+		"fileTypes": [".cs"],
+		"rootMarkers": ["*.sln", "*.csproj"]
+	},
+	"solargraph": {
+		"command": "solargraph",
+		"args": ["stdio"],
+		"fileTypes": [".rb"],
+		"rootMarkers": ["Gemfile", ".solargraph.yml"]
+	},
+	"elixir-ls": {
+		"command": "elixir-ls",
+		"args": [],
+		"fileTypes": [".ex", ".exs"],
+		"rootMarkers": ["mix.exs"]
+	},
+	"erlang-ls": {
+		"command": "erlang_ls",
+		"args": [],
+		"fileTypes": [".erl", ".hrl"],
+		"rootMarkers": ["rebar.config", "erlang.mk"]
+	},
+	"haskell-language-server": {
+		"command": "haskell-language-server-wrapper",
+		"args": ["--lsp"],
+		"fileTypes": [".hs"],
+		"rootMarkers": ["*.cabal", "stack.yaml", "cabal.project"]
+	},
+	"ocamllsp": {
+		"command": "ocamllsp",
+		"args": [],
+		"fileTypes": [".ml", ".mli"],
+		"rootMarkers": ["dune-project", "*.opam"]
+	},
+	"metals": {
+		"command": "metals",
+		"args": [],
+		"fileTypes": [".scala", ".sc"],
+		"rootMarkers": ["build.sbt", "build.sc", ".scala-build"]
+	},
+	"dartls": {
+		"command": "dart",
+		"args": ["language-server", "--protocol=lsp"],
+		"fileTypes": [".dart"],
+		"rootMarkers": ["pubspec.yaml"]
+	},
+	"sourcekit-lsp": {
+		"command": "sourcekit-lsp",
+		"args": [],
+		"fileTypes": [".swift"],
+		"rootMarkers": ["Package.swift", "*.xcodeproj"]
+	},
+	"intelephense": {
+		"command": "intelephense",
+		"args": ["--stdio"],
+		"fileTypes": [".php"],
+		"rootMarkers": ["composer.json"]
+	},
+	"bash-language-server": {
+		"command": "bash-language-server",
+		"args": ["start"],
+		"fileTypes": [".sh", ".bash", ".zsh"],
+		"rootMarkers": []
+	},
+	"vscode-css-languageserver": {
+		"command": "vscode-css-language-server",
+		"args": ["--stdio"],
+		"fileTypes": [".css", ".scss", ".less"],
+		"rootMarkers": ["package.json"]
+	},
+	"vscode-html-languageserver": {
+		"command": "vscode-html-language-server",
+		"args": ["--stdio"],
+		"fileTypes": [".html"],
+		"rootMarkers": ["package.json"]
+	},
+	"yaml-language-server": {
+		"command": "yaml-language-server",
+		"args": ["--stdio"],
+		"fileTypes": [".yaml", ".yml"],
+		"rootMarkers": []
+	},
+	"vscode-json-languageserver": {
+		"command": "vscode-json-language-server",
+		"args": ["--stdio"],
+		"fileTypes": [".json", ".jsonc"],
+		"rootMarkers": []
+	},
+	"gleam": {
+		"command": "gleam",
+		"args": ["lsp"],
+		"fileTypes": [".gleam"],
+		"rootMarkers": ["gleam.toml"]
+	},
+	"nil": {
+		"command": "nil",
+		"args": [],
+		"fileTypes": [".nix"],
+		"rootMarkers": ["flake.nix", "default.nix", "shell.nix"]
+	},
+	"terraform-ls": {
+		"command": "terraform-ls",
+		"args": ["serve"],
+		"fileTypes": [".tf", ".tfvars"],
+		"rootMarkers": [".terraform", "*.tf"]
+	},
+	"graphql-lsp": {
+		"command": "graphql-lsp",
+		"args": ["server", "-m", "stream"],
+		"fileTypes": [".graphql", ".gql"],
+		"rootMarkers": [".graphqlrc", ".graphqlrc.json", ".graphqlrc.yaml", "graphql.config.js"]
+	},
+	"vue-language-server": {
+		"command": "vue-language-server",
+		"args": ["--stdio"],
+		"fileTypes": [".vue"],
+		"rootMarkers": ["package.json", "vue.config.js"]
+	},
+	"svelte-language-server": {
+		"command": "svelteserver",
+		"args": ["--stdio"],
+		"fileTypes": [".svelte"],
+		"rootMarkers": ["svelte.config.js", "svelte.config.ts"]
+	},
+	"astro-ls": {
+		"command": "astro-ls",
+		"args": ["--stdio"],
+		"fileTypes": [".astro"],
+		"rootMarkers": ["astro.config.mjs", "astro.config.ts"]
+	},
+	"eslint": {
+		"command": "vscode-eslint-language-server",
+		"args": ["--stdio"],
+		"fileTypes": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+		"rootMarkers": [".eslintrc", ".eslintrc.json", ".eslintrc.js", "eslint.config.js", "eslint.config.mjs"],
+		"isLinter": true
+	},
+	"biome": {
+		"command": "biome",
+		"args": ["lsp-proxy"],
+		"fileTypes": [".ts", ".tsx", ".js", ".jsx", ".json", ".css"],
+		"rootMarkers": ["biome.json", "biome.jsonc"],
+		"isLinter": true
+	},
+	"ruff": {
+		"command": "ruff",
+		"args": ["server"],
+		"fileTypes": [".py"],
+		"rootMarkers": ["pyproject.toml", "ruff.toml", ".ruff.toml"],
+		"isLinter": true
+	}
+}
