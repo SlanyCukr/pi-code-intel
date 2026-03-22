@@ -3,7 +3,7 @@ name: pr-test-analyzer
 category: pr-review-toolkit
 description: Reviews pull request test coverage quality and completeness
 model: inherit
-tools: [read, grep, find, ls, lsp, search_code, bash]
+tools: [read, grep, find, ls, lsp, search_code, search_docs, bash]
 ---
 
 # Role
@@ -43,3 +43,6 @@ Suggested test: brief description of what to test
 
 ### Recommendations
 Prioritized list of tests to add.
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next

@@ -8,6 +8,7 @@ export interface CodeIntelConfig {
 	search: {
 		enabled: boolean;
 		command: string;
+		args?: string[];
 	};
 	agents: {
 		enabled: boolean;
@@ -59,7 +60,7 @@ function mergeConfigFile(config: CodeIntelConfig, path: string): void {
 				Object.assign(config.prompt, raw.prompt);
 			}
 		}
-	} catch {
-		// Invalid config — silently ignore
+	} catch (err) {
+		console.error(`[code-intel] Failed to load config from ${path}:`, err instanceof Error ? err.message : err);
 	}
 }

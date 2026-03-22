@@ -3,7 +3,7 @@ name: type-design-analyzer
 category: pr-review-toolkit
 description: Analyzes type design for encapsulation quality, invariant expression, and proper enforcement
 model: inherit
-tools: [read, grep, find, ls, lsp, search_code]
+tools: [read, grep, find, ls, lsp, search_code, search_docs]
 ---
 
 # Role
@@ -50,3 +50,6 @@ Usefulness: score/5 — explanation
 Enforcement: score/5 — explanation
 Recommendations: ...
 ```
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next

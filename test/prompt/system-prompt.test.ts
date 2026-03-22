@@ -1,186 +1,168 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt } from "../../src/prompt/system-prompt.js";
+import {
+	type SystemPromptOptions,
+	buildSystemPrompt,
+} from "../../src/prompt/system-prompt.js";
 
-const DEFAULT_OPTS = {
+const DEFAULT_OPTS: SystemPromptOptions = {
 	hasLsp: false,
 	hasSearch: false,
 	hasAgent: false,
-	activeTools: ["read", "bash", "edit", "write"],
+	activeTools: ["read", "edit", "write", "bash", "grep", "find", "ls"],
 	toolSnippets: {},
 	piSystemPrompt: "",
 };
 
+function buildWith(overrides: Partial<SystemPromptOptions>): string {
+	return buildSystemPrompt({ ...DEFAULT_OPTS, ...overrides });
+}
+
 describe("buildSystemPrompt", () => {
-	it("includes role section", () => {
-		const result = buildSystemPrompt(DEFAULT_OPTS);
-		expect(result).toContain("expert coding agent");
+	it("includes identity/role section", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("expert coding agent");
+		expect(prompt).toContain("Daneel");
 	});
 
-	it("includes active tools", () => {
-		const result = buildSystemPrompt(DEFAULT_OPTS);
-		expect(result).toContain("Available tools:");
-		expect(result).toContain("- read:");
-		expect(result).toContain("- bash:");
-		expect(result).toContain("- edit:");
-		expect(result).toContain("- write:");
-	});
-
-	it("includes guidelines", () => {
-		const result = buildSystemPrompt(DEFAULT_OPTS);
-		expect(result).toContain("Guidelines:");
-		expect(result).toContain("Read files before editing");
-		expect(result).toContain("Be concise");
+	it("includes active tools listing", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("Available tools:");
+		for (const tool of DEFAULT_OPTS.activeTools) {
+			expect(prompt).toContain(`- ${tool}:`);
+		}
 	});
 
 	it("includes date and cwd", () => {
-		const result = buildSystemPrompt(DEFAULT_OPTS);
-		expect(result).toContain("Current date:");
-		expect(result).toContain("Current working directory:");
+		const prompt = buildWith({});
+		const today = new Date().toISOString().slice(0, 10);
+		expect(prompt).toContain(`Current date: ${today}`);
+		expect(prompt).toContain("Current working directory:");
 	});
 
-	it("does NOT include code intel section when LSP/search inactive", () => {
-		const result = buildSystemPrompt(DEFAULT_OPTS);
-		expect(result).not.toContain("Tool selection hierarchy");
-	});
-
-	it("does NOT include sub-agent section when agent inactive", () => {
-		const result = buildSystemPrompt(DEFAULT_OPTS);
-		expect(result).not.toContain("Sub-agent delegation");
-	});
-
-	it("includes workflow table when LSP is active", () => {
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
+	it("includes LSP operations when hasLsp=true and activeTools includes lsp", () => {
+		const prompt = buildWith({
 			hasLsp: true,
 			activeTools: [...DEFAULT_OPTS.activeTools, "lsp"],
 		});
-		expect(result).toContain("Tool selection hierarchy");
-		expect(result).toContain("lsp definition");
-		expect(result).toContain("lsp references");
-		expect(result).toContain("lsp incoming_calls");
-		expect(result).toContain("lsp outgoing_calls");
-		expect(result).toContain("lsp document_symbols");
+		expect(prompt).toContain("LSP operations");
+		expect(prompt).toContain("definition");
+		expect(prompt).toContain("references");
+		expect(prompt).toContain("document_symbols");
 	});
 
-	it("includes workflow table when search is active", () => {
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			hasSearch: true,
-			activeTools: [...DEFAULT_OPTS.activeTools, "search_code"],
-		});
-		expect(result).toContain("Tool selection hierarchy");
-		expect(result).toContain("search_code");
-		expect(result).toContain("search_docs");
-	});
-
-	it("includes sub-agent guidance when agent is active", () => {
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			hasAgent: true,
-			activeTools: [...DEFAULT_OPTS.activeTools, "agent"],
-		});
-		expect(result).toContain("Sub-agent delegation");
-	});
-
-	it("includes all sections when everything active", () => {
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			hasLsp: true,
-			hasSearch: true,
-			hasAgent: true,
-			activeTools: [
-				...DEFAULT_OPTS.activeTools,
-				"lsp",
-				"search_code",
-				"search_docs",
-				"agent",
-			],
-		});
-		expect(result).toContain("Tool selection hierarchy");
-		expect(result).toContain("Sub-agent delegation");
-		expect(result).toContain("- lsp:");
-		expect(result).toContain("- search_code:");
-		expect(result).toContain("- agent:");
-	});
-
-	it("includes pre-tool checkpoint", () => {
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			hasLsp: true,
-			hasSearch: true,
-			activeTools: [...DEFAULT_OPTS.activeTools, "lsp", "search_code"],
-		});
-		expect(result).toContain("Pre-tool checkpoint");
-	});
-
-	it("includes when grep/find are the right choice", () => {
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			hasLsp: true,
+	it("does NOT include LSP operations when hasLsp=false", () => {
+		const prompt = buildWith({
+			hasLsp: false,
 			activeTools: [...DEFAULT_OPTS.activeTools, "lsp"],
 		});
-		expect(result).toContain("When grep/find ARE the right choice");
-		expect(result).toContain("Exact text patterns");
+		expect(prompt).not.toContain("### LSP operations");
 	});
 
-	it("extracts project context from pi prompt", () => {
-		const piPrompt = `Some default stuff
+	it("does NOT include LSP operations when lsp not in activeTools", () => {
+		const prompt = buildWith({ hasLsp: true });
+		expect(prompt).not.toContain("### LSP operations");
+	});
 
-# Project Context
+	it("includes bash routing when activeTools includes bash", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("MUST NOT use bash for code exploration");
+	});
 
-Project-specific instructions and guidelines:
+	it("does NOT include bash routing when bash not in activeTools", () => {
+		const prompt = buildWith({ activeTools: ["read", "edit"] });
+		expect(prompt).not.toContain("MUST NOT use bash for code exploration");
+	});
 
-## AGENTS.md
+	it("includes code exploration when hasLsp=true", () => {
+		const prompt = buildWith({ hasLsp: true });
+		expect(prompt).toContain("Code exploration protocol");
+	});
 
-Some agent guidelines here
+	it("includes code exploration when hasSearch=true", () => {
+		const prompt = buildWith({ hasSearch: true });
+		expect(prompt).toContain("Code exploration protocol");
+	});
 
-Current date: 2024-01-01
-Current working directory: /tmp`;
+	it("does NOT include code exploration when both hasLsp=false and hasSearch=false", () => {
+		const prompt = buildWith({ hasLsp: false, hasSearch: false });
+		expect(prompt).not.toContain("Code exploration protocol");
+	});
 
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			piSystemPrompt: piPrompt,
+	it("includes sub-agent delegation when hasAgent=true", () => {
+		const prompt = buildWith({ hasAgent: true });
+		expect(prompt).toContain("Sub-agent delegation");
+		expect(prompt).toContain("Briefing");
+		expect(prompt).toContain("Forward intelligence");
+	});
+
+	it("does NOT include sub-agent section when hasAgent=false", () => {
+		const prompt = buildWith({ hasAgent: false });
+		expect(prompt).not.toContain("Sub-agent delegation");
+	});
+
+	it("includes editing section when tools include read and edit", () => {
+		const prompt = buildWith({ activeTools: ["read", "edit", "write"] });
+		expect(prompt).toContain("## Editing");
+		expect(prompt).toContain("MUST read files before editing");
+	});
+
+	it("does NOT include editing section when tools lack read and edit", () => {
+		const prompt = buildWith({ activeTools: ["bash", "grep"] });
+		expect(prompt).not.toContain("## Editing");
+	});
+
+	it("always includes design integrity", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("Design integrity");
+	});
+
+	it("always includes debugging discipline", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("Debugging discipline");
+	});
+
+	it("always includes planning doctrine", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("Planning doctrine");
+	});
+
+	it("custom tool snippets override built-in descriptions", () => {
+		const customDesc = "My custom read tool description";
+		const prompt = buildWith({
+			toolSnippets: { read: customDesc },
 		});
-		expect(result).toContain("# Project Context");
-		expect(result).toContain("Some agent guidelines here");
+		expect(prompt).toContain(`- read: ${customDesc}`);
+		expect(prompt).not.toContain("Read file contents (text or images)");
+	});
+});
+
+describe("extractProjectContext (via buildSystemPrompt)", () => {
+	it("extracts project context from piSystemPrompt", () => {
+		const piPrompt = [
+			"Some preamble text",
+			"# Project Context",
+			"This project uses TypeScript and vitest for testing.",
+			"Current date: 2026-03-22",
+		].join("\n");
+		const prompt = buildWith({ piSystemPrompt: piPrompt });
+		expect(prompt).toContain("# Project Context");
+		expect(prompt).toContain(
+			"This project uses TypeScript and vitest for testing.",
+		);
 	});
 
-	it("extracts skills from pi prompt", () => {
-		const piPrompt = `Default stuff
-
-The following skills provide specialized instructions for specific tasks.
-Use the read tool to load a skill's file when the task matches its description.
-
-<available_skills>
-  <skill>
-    <name>test-skill</name>
-    <description>A test skill</description>
-    <location>/path/to/skill</location>
-  </skill>
-</available_skills>
-
-Current date: 2024-01-01`;
-
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			piSystemPrompt: piPrompt,
-		});
-		expect(result).toContain("available_skills");
-		expect(result).toContain("test-skill");
-	});
-
-	it("uses custom tool snippets", () => {
-		const result = buildSystemPrompt({
-			...DEFAULT_OPTS,
-			activeTools: [...DEFAULT_OPTS.activeTools, "my_tool"],
-			toolSnippets: { my_tool: "Does something special" },
-		});
-		expect(result).toContain("- my_tool: Does something special");
-	});
-
-	it("does not include pi documentation paths", () => {
-		const result = buildSystemPrompt(DEFAULT_OPTS);
-		expect(result).not.toContain("Pi documentation");
-		expect(result).not.toContain("docs/extensions.md");
+	it("extracts skills section from piSystemPrompt", () => {
+		const piPrompt = [
+			"Some preamble text",
+			"The following skills provide specialized instructions for the agent.",
+			"- /commit: Create a git commit",
+			"- /review: Review code changes",
+			"Current date: 2026-03-22",
+		].join("\n");
+		const prompt = buildWith({ piSystemPrompt: piPrompt });
+		expect(prompt).toContain(
+			"The following skills provide specialized instructions",
+		);
+		expect(prompt).toContain("/commit");
 	});
 });

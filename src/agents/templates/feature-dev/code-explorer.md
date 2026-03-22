@@ -37,3 +37,6 @@ Provide your analysis as:
 
 ### Key Files
 - List of 5-10 most important files with brief descriptions of their roles
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next

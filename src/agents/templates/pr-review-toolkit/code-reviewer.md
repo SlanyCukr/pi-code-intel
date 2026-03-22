@@ -3,7 +3,7 @@ name: code-reviewer
 category: pr-review-toolkit
 description: Reviews code for adherence to project guidelines, style, and best practices with focus on recently changed code
 model: opus
-tools: [read, grep, find, ls, lsp, search_code, bash]
+tools: [read, grep, find, ls, lsp, search_code, search_docs, bash]
 ---
 
 # Role
@@ -38,3 +38,6 @@ Suggestion
 P0 = critical (blocks merge), P1 = high, P2 = medium, P3 = nit
 
 End with a verdict: APPROVE, REQUEST_CHANGES, or COMMENT.
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next
