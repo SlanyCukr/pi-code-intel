@@ -23,8 +23,8 @@ export function loadLspConfig(cwd: string): LspConfiguration {
 	try {
 		const raw = readFileSync(defaultsPath, "utf-8");
 		servers = JSON.parse(raw);
-	} catch {
-		// Defaults missing — continue with empty
+	} catch (err) {
+		console.error(`[lsp] Failed to load built-in LSP defaults:`, err instanceof Error ? err.message : err);
 	}
 
 	// 2. User-level overrides
@@ -58,8 +58,8 @@ function mergeConfigFile(
 				}
 			}
 		}
-	} catch {
-		// Invalid config — silently ignore
+	} catch (err) {
+		console.error(`[lsp] Failed to load config from ${configPath}:`, err instanceof Error ? err.message : err);
 	}
 }
 

@@ -55,10 +55,17 @@ function loadCommandTemplates(): CommandTemplate[] {
 			const template = parseCommandTemplate(content);
 			if (template) {
 				templates.push(template);
+			} else {
+				console.error(
+					`[code-intel] Failed to parse command template: ${file} (check frontmatter format)`,
+				);
 			}
 		}
-	} catch {
-		// Templates directory not found — continue without commands
+	} catch (err) {
+		console.error(
+			"[code-intel] Failed to load command templates:",
+			err instanceof Error ? err.message : err,
+		);
 	}
 
 	return templates;
@@ -67,8 +74,9 @@ function loadCommandTemplates(): CommandTemplate[] {
 /**
  * Register all command templates as pi slash commands.
  *
- * Each command expands its template (replacing $ARGUMENTS) and sends
- * it as a user message to trigger the agent.
+ * Each command expands its template (replacing $ARGUMENTS) and injects the result
+ * into the conversation via sendUserMessage (or sendMessage with display:false
+ * as a fallback for older SDK versions).
  */
 export function registerCommands(pi: ExtensionAPI): void {
 	// Cast to any: pi.registerCommand and pi.sendUserMessage exist
@@ -77,26 +85,29 @@ export function registerCommands(pi: ExtensionAPI): void {
 	const piAny = pi as any;
 
 	if (typeof piAny.registerCommand !== "function") {
-		// SDK version doesn't support registerCommand — skip silently
+		console.error(
+			"[code-intel] SDK does not support registerCommand — slash commands unavailable",
+		);
 		return;
 	}
 
-	// Register command templates (feature-dev, review-pr)
+	// Register command templates from the templates directory
 	const templates = loadCommandTemplates();
 	for (const template of templates) {
 		piAny.registerCommand(template.name, {
 			description: template.description,
 			handler: async (args: string) => {
-				const expanded = template.prompt.replace(
-					/\$ARGUMENTS/g,
-					args || "",
-				);
+				const expanded = template.prompt.replace(/\$ARGUMENTS/g, args || "");
 				if (typeof piAny.sendUserMessage === "function") {
 					piAny.sendUserMessage(expanded);
 				} else if (typeof piAny.sendMessage === "function") {
 					piAny.sendMessage(
 						{ content: expanded, display: false },
 						{ triggerTurn: true },
+					);
+				} else {
+					console.error(
+						"[code-intel] Cannot send command message: SDK does not expose sendUserMessage or sendMessage",
 					);
 				}
 			},
@@ -129,15 +140,11 @@ function registerAgentsCommand(pi: any): void {
 				lines.push(`\n${category}:`);
 				for (const agent of categoryAgents) {
 					const model =
-						agent.model === "inherit"
-							? "inherits parent"
-							: agent.model;
+						agent.model === "inherit" ? "inherits parent" : agent.model;
 					lines.push(
 						`  ${category}:${agent.name}  (${model})  ${agent.description}`,
 					);
-					lines.push(
-						`    tools: [${agent.tools.join(", ")}]`,
-					);
+					lines.push(`    tools: [${agent.tools.join(", ")}]`);
 				}
 			}
 

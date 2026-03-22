@@ -32,12 +32,32 @@ function collectSourceFiles(
 	maxFiles = MAX_WARMUP_FILES,
 ): string[] {
 	const files: string[] = [];
+	const visited = new Set<string>();
 	const walk = (dir: string) => {
 		if (files.length >= maxFiles) return;
+
+		// Symlink loop protection: track visited directories by dev:ino
+		try {
+			const dirStat = statSync(dir);
+			const key = `${dirStat.dev}:${dirStat.ino}`;
+			if (visited.has(key)) return;
+			visited.add(key);
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code !== 'EACCES' && code !== 'ENOENT') {
+				console.error(`[lsp] Error accessing ${dir}:`, err instanceof Error ? err.message : err);
+			}
+			return;
+		}
+
 		let entries: string[];
 		try {
 			entries = readdirSync(dir);
-		} catch {
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code !== 'EACCES' && code !== 'ENOENT') {
+				console.error(`[lsp] Error reading ${dir}:`, err instanceof Error ? err.message : err);
+			}
 			return;
 		}
 		for (const entry of entries) {
@@ -51,8 +71,11 @@ function collectSourceFiles(
 				} else if (stat.isFile() && extensions.has(extname(full))) {
 					files.push(full);
 				}
-			} catch {
-				// Skip inaccessible files
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException).code;
+				if (code !== 'EACCES' && code !== 'ENOENT') {
+					console.error(`[lsp] Error accessing ${full}:`, err instanceof Error ? err.message : err);
+				}
 			}
 		}
 	};
@@ -137,21 +160,24 @@ export class LspClientManager {
 		const promises = detected.map(async (name) => {
 			const serverConfig = this.config.servers[name];
 			if (!serverConfig || serverConfig.isLinter) return;
+			let timer: ReturnType<typeof setTimeout>;
 			try {
 				const client = await Promise.race([
 					this.getOrCreate(name, serverConfig),
-					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error("timeout")), timeoutMs),
-					),
+					new Promise<never>((_, reject) => {
+						timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+					}),
 				]);
+				clearTimeout(timer!);
 				// Open project source files so the server indexes them
 				const exts = new Set(serverConfig.fileTypes);
 				const files = collectSourceFiles(this.cwd, exts);
 				for (const file of files) {
 					await this.syncFile(client, file);
 				}
-			} catch {
-				// Server failed to start or timed out — will be retried lazily
+			} catch (err) {
+				clearTimeout(timer!);
+				console.error(`[lsp] warmup failed for ${name}:`, err instanceof Error ? err.message : err);
 			}
 		});
 		await Promise.allSettled(promises);
@@ -335,11 +361,17 @@ export class LspClientManager {
 			const body = client.buffer.subarray(bodyStart, bodyEnd).toString("utf-8");
 			client.buffer = Buffer.from(client.buffer.subarray(bodyEnd));
 
+			let message: JsonRpcResponse | JsonRpcNotification | JsonRpcRequest;
 			try {
-				const message = JSON.parse(body);
-				this.handleMessage(client, message);
+				message = JSON.parse(body);
 			} catch {
 				// Malformed JSON — skip
+				continue;
+			}
+			try {
+				this.handleMessage(client, message);
+			} catch (err) {
+				console.error(`[lsp:${client.serverName}] Error handling message:`, err instanceof Error ? err.message : err);
 			}
 		}
 	}
@@ -417,8 +449,8 @@ export class LspClientManager {
 			} else if (request.method === "client/registerCapability") {
 				this.sendResponse(client, request.id, null);
 			}
-		} catch {
-			// Respond with empty result to avoid blocking the server
+		} catch (err) {
+			console.error(`[lsp:${client.serverName}] Error handling server request ${request.method}:`, err instanceof Error ? err.message : err);
 			this.sendResponse(client, request.id, null);
 		}
 	}
@@ -539,6 +571,8 @@ export class LspClientManager {
 		const stdin = client.process.stdin;
 		if (stdin && !stdin.destroyed) {
 			stdin.write(header + body);
+		} else {
+			console.error(`[lsp:${client.serverName}] Cannot write message: stdin is ${stdin ? 'destroyed' : 'null'}`);
 		}
 	}
 
@@ -553,8 +587,12 @@ export class LspClientManager {
 		let content: string;
 		try {
 			content = readFileSync(absPath, "utf-8");
-		} catch {
-			return; // File doesn't exist
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code !== 'ENOENT') {
+				console.error(`[lsp:${client.serverName}] Failed to read ${absPath}:`, err instanceof Error ? err.message : err);
+			}
+			return;
 		}
 
 		const existing = client.openFiles.get(uri);
@@ -626,8 +664,8 @@ export class LspClientManager {
 			await this.sendRequest(client, "shutdown", null, undefined, 5000);
 			// Send exit notification
 			this.sendNotification(client, "exit", null);
-		} catch {
-			// Force kill if shutdown fails
+		} catch (err) {
+			console.error(`[lsp] Graceful shutdown failed for ${name}, force-killing:`, err instanceof Error ? err.message : err);
 			client.process.kill("SIGTERM");
 		}
 		this.clients.delete(name);

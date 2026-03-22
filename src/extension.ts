@@ -26,16 +26,34 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	const config = loadCodeIntelConfig(cwd);
 	const cleanupFns: Array<() => Promise<void>> = [];
 
-	// 0. Ensure grep, find, ls are active (pi defaults to read/bash/edit/write only)
-	const piAny = pi as any;
-	if (typeof piAny.getActiveTools === "function" && typeof piAny.setActiveTools === "function") {
-		const active: string[] = piAny.getActiveTools();
-		const needed = ["grep", "find", "ls"];
-		const missing = needed.filter((t) => !active.includes(t));
-		if (missing.length > 0) {
-			piAny.setActiveTools([...active, ...missing]);
+	// 0. Defer action-method calls (setActiveTools, registerCommand) to runtime.
+	// Pi does not allow action methods during extension loading — only registration
+	// methods (registerTool, on) are permitted in the factory function.
+	let runtimeInitDone = false;
+	const hasAgents = config.agents.enabled;
+	pi.on("before_agent_start", () => {
+		if (runtimeInitDone) return;
+		runtimeInitDone = true;
+
+		// Ensure grep, find, ls are active (pi defaults to read/bash/edit/write only)
+		const piAny = pi as any;
+		if (
+			typeof piAny.getActiveTools === "function" &&
+			typeof piAny.setActiveTools === "function"
+		) {
+			const active: string[] = piAny.getActiveTools();
+			const needed = ["grep", "find", "ls"];
+			const missing = needed.filter((t) => !active.includes(t));
+			if (missing.length > 0) {
+				piAny.setActiveTools([...active, ...missing]);
+			}
 		}
-	}
+
+		// Register slash commands (requires registerCommand action method)
+		if (hasAgents) {
+			registerCommands(pi);
+		}
+	});
 
 	// 1. LSP subsystem
 	let lspManager: LspClientManager | null = null;
@@ -46,12 +64,21 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		pi.registerTool(lspTool);
 		cleanupFns.push(() => lspManager!.shutdown());
 		// Start detected servers in background so they can index the workspace
-		lspManager.warmup().catch(() => {});
+		lspManager.warmup().catch((err) => {
+			console.error(
+				"[code-intel] LSP warmup failed:",
+				err instanceof Error ? err.message : err,
+			);
+		});
 	}
 
 	// 2. Semantic search subsystem
 	if (config.search.enabled) {
-		const semvex = new SemvexProcess(cwd, config.search.command, config.search.args);
+		const semvex = new SemvexProcess(
+			cwd,
+			config.search.command,
+			config.search.args,
+		);
 		const [searchCodeTool, searchDocsTool] = createSearchTools(semvex);
 		pi.registerTool(searchCodeTool);
 		pi.registerTool(searchDocsTool);
@@ -69,7 +96,11 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 			);
 		}
 		if (config.search.enabled) {
-			const semvexForAgents = new SemvexProcess(cwd, config.search.command, config.search.args);
+			const semvexForAgents = new SemvexProcess(
+				cwd,
+				config.search.command,
+				config.search.args,
+			);
 			const [sc, sd] = createSearchTools(semvexForAgents);
 			registeredCustomTools.push(sc as unknown as ToolDefinition);
 			registeredCustomTools.push(sd as unknown as ToolDefinition);
@@ -77,9 +108,6 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		}
 		const agentTool = createAgentTool(registeredCustomTools);
 		pi.registerTool(agentTool);
-
-		// Register slash commands that orchestrate sub-agents
-		registerCommands(pi);
 	}
 
 	// 4. System prompt — fully replace pi's default
@@ -128,10 +156,20 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 					.getClientForFile(filePath)
 					.then((client) => {
 						if (client) {
-							manager.syncFile(client, filePath!).catch(() => {});
+							manager.syncFile(client, filePath!).catch((err) => {
+								console.error(
+									`[lsp] Failed to sync file ${filePath} after edit:`,
+									err instanceof Error ? err.message : err,
+								);
+							});
 						}
 					})
-					.catch(() => {});
+					.catch((err) => {
+						console.error(
+							`[lsp] Failed to sync file ${filePath} after edit:`,
+							err instanceof Error ? err.message : err,
+						);
+					});
 			}
 		});
 	}

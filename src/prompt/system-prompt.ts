@@ -15,10 +15,9 @@ export interface SystemPromptOptions {
 /**
  * Build the complete system prompt, replacing pi's default.
  *
- * Incorporates: Daneel persona (Humble Master), RFC 2119 binding (Oh My Pi),
- * XML semantic tags (Oh My Pi), debugging discipline (GSD-2), planning doctrine
- * (GSD-2), forward intelligence (GSD-2), design integrity (Oh My Pi), and
- * code intelligence workflow for LSP/semantic search tool routing.
+ * Incorporates: Daneel persona, RFC 2119 binding, XML semantic tags,
+ * debugging discipline, planning doctrine, forward intelligence, design
+ * integrity, and code intelligence workflow for LSP/semantic search tool routing.
  */
 export function buildSystemPrompt(options: SystemPromptOptions): string {
 	const {

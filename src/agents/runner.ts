@@ -91,7 +91,7 @@ function parseTemplate(content: string): AgentTemplate | null {
 export function loadTemplates(): Map<string, AgentTemplate> {
 	if (templateCache) return templateCache;
 
-	templateCache = new Map();
+	const templates = new Map<string, AgentTemplate>();
 	const templatesDir = join(__dirname, "templates");
 
 	try {
@@ -109,14 +109,19 @@ export function loadTemplates(): Map<string, AgentTemplate> {
 				const template = parseTemplate(content);
 				if (template) {
 					const fullName = `${template.category}:${template.name}`;
-					templateCache.set(fullName, template);
+					templates.set(fullName, template);
 				}
 			}
 		}
-	} catch {
-		// Templates directory not found — continue with empty cache
+	} catch (err) {
+		console.error(
+			"[code-intel] Failed to load agent templates:",
+			err instanceof Error ? err.message : err,
+		);
+		return new Map();
 	}
 
+	templateCache = templates;
 	return templateCache;
 }
 
@@ -211,7 +216,7 @@ export async function runSubAgent(
 			sessionManager: SessionManager.inMemory(cwd),
 		});
 
-		// Build system prompt: template prompt + shared guidance
+		// Build system prompt: template prompt + code exploration guidance (if LSP/search available) + forward intelligence
 		const hasLsp = filteredCustomTools?.some((t) => t.name === "lsp") ?? false;
 		const hasSearch =
 			filteredCustomTools?.some((t) => t.name === "search_code") ?? false;

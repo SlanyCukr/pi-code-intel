@@ -58,13 +58,17 @@ export class SemvexProcess {
 		});
 
 		// Handle unexpected exit — always clear state
-		child.on("exit", () => {
+		child.on("exit", (code, signal) => {
+			if (code !== 0 && code !== null) {
+				console.error(`[semvex] Process exited with code ${code}${signal ? `, signal ${signal}` : ""}`);
+			}
 			this.client = null;
 			this.process = null;
 			this.starting = null;
 		});
 
-		child.on("error", () => {
+		child.on("error", (err) => {
+			console.error("[semvex] Process error:", err.message);
 			this.client = null;
 			this.process = null;
 			this.starting = null;
@@ -126,8 +130,8 @@ export class SemvexProcess {
 				});
 
 				if (!failed) return child;
-			} catch {
-				// Try next variant
+			} catch (err) {
+				console.error(`[semvex] Spawn attempt failed for variant:`, err instanceof Error ? err.message : err);
 			}
 		}
 
