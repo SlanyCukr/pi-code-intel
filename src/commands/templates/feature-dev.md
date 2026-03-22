@@ -11,9 +11,9 @@ You are helping a developer implement a new feature. Follow a systematic approac
 ## Core Principles
 
 - **Ask clarifying questions**: Identify all ambiguities, edge cases, and underspecified behaviors. Ask specific, concrete questions rather than making assumptions. Wait for user answers before proceeding with implementation. Ask questions early (after understanding the codebase, before designing architecture).
-- **Understand before acting**: Read and comprehend existing code patterns first.
+- **Understand before acting**: Read and comprehend existing code patterns first
 - **Read files identified by agents**: When launching agents, ask them to return lists of the most important files to read. After agents complete, read those files to build detailed context before proceeding.
-- **Simple and elegant**: Prioritize readable, maintainable, architecturally sound code.
+- **Simple and elegant**: Prioritize readable, maintainable, architecturally sound code
 
 ---
 
@@ -24,7 +24,7 @@ You are helping a developer implement a new feature. Follow a systematic approac
 Initial request: $ARGUMENTS
 
 **Actions**:
-1. If the feature is unclear, ask the user for:
+1. If feature unclear, ask user for:
    - What problem are they solving?
    - What should the feature do?
    - Any constraints or requirements?
@@ -37,9 +37,9 @@ Initial request: $ARGUMENTS
 **Goal**: Understand relevant existing code and patterns at both high and low levels
 
 **Actions**:
-1. Launch 2-3 `feature-dev:code-explorer` agents in parallel using the agent tool. Each agent should:
+1. Launch 2-3 code-explorer agents in parallel. Each agent should:
    - Trace through the code comprehensively and focus on getting a comprehensive understanding of abstractions, architecture and flow of control
-   - Target a different aspect of the codebase (e.g. similar features, high level understanding, architectural understanding, user experience)
+   - Target a different aspect of the codebase (eg. similar features, high level understanding, architectural understanding, user experience, etc)
    - Include a list of 5-10 key files to read
 
    **Example agent prompts**:
@@ -48,8 +48,7 @@ Initial request: $ARGUMENTS
    - "Analyze the current implementation of [existing feature/area], tracing through the code comprehensively"
    - "Identify UI patterns, testing approaches, or extension points relevant to [feature]"
 
-2. Once the agents return, read all files identified by agents to build deep understanding
-
+2. Once the agents return, please read all files identified by agents to build deep understanding
 3. Present comprehensive summary of findings and patterns discovered
 
 ---
@@ -75,7 +74,7 @@ If the user says "whatever you think is best", provide your recommendation and g
 **Goal**: Design multiple implementation approaches with different trade-offs
 
 **Actions**:
-1. Launch 2-3 `feature-dev:code-architect` agents in parallel using the agent tool, each with a different focus: minimal changes (smallest change, maximum reuse), clean architecture (maintainability, elegant abstractions), or pragmatic balance (speed + quality)
+1. Launch 2-3 code-architect agents in parallel with different focuses: minimal changes (smallest change, maximum reuse), clean architecture (maintainability, elegant abstractions), or pragmatic balance (speed + quality)
 2. Review all approaches and form your opinion on which fits best for this specific task (consider: small fix vs large feature, urgency, complexity, team context)
 3. Present to user: brief summary of each approach, trade-offs comparison, **your recommendation with reasoning**, concrete implementation differences
 4. **Ask user which approach they prefer**
@@ -102,7 +101,7 @@ If the user says "whatever you think is best", provide your recommendation and g
 **Goal**: Ensure code is simple, DRY, elegant, easy to read, and functionally correct
 
 **Actions**:
-1. Launch 3 `feature-dev:code-reviewer` agents in parallel using the agent tool, each with a different focus: simplicity/DRY/elegance, bugs/functional correctness, project conventions/abstractions
+1. Launch 3 code-reviewer agents in parallel with different focuses: simplicity/DRY/elegance, bugs/functional correctness, project conventions/abstractions
 2. Consolidate findings and identify highest severity issues that you recommend fixing
 3. **Present findings to user and ask what they want to do** (fix now, fix later, or proceed as-is)
 4. Address issues based on user decision
@@ -119,3 +118,5 @@ If the user says "whatever you think is best", provide your recommendation and g
    - Key decisions made
    - Files modified
    - Suggested next steps
+
+---

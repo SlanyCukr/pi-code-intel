@@ -81,10 +81,10 @@ describe("feature-dev template", () => {
 		}
 	});
 
-	it("references feature-dev sub-agents", () => {
-		expect(template.prompt).toContain("feature-dev:code-explorer");
-		expect(template.prompt).toContain("feature-dev:code-architect");
-		expect(template.prompt).toContain("feature-dev:code-reviewer");
+	it("references sub-agents", () => {
+		expect(template.prompt).toContain("code-explorer");
+		expect(template.prompt).toContain("code-architect");
+		expect(template.prompt).toContain("code-reviewer");
 	});
 
 	it("has user checkpoints", () => {
@@ -125,23 +125,13 @@ describe("review-pr template", () => {
 		expect(template.prompt).toContain("$ARGUMENTS");
 	});
 
-	it("references all pr-review-toolkit sub-agents", () => {
-		expect(template.prompt).toContain(
-			"pr-review-toolkit:comment-analyzer",
-		);
-		expect(template.prompt).toContain(
-			"pr-review-toolkit:pr-test-analyzer",
-		);
-		expect(template.prompt).toContain(
-			"pr-review-toolkit:silent-failure-hunter",
-		);
-		expect(template.prompt).toContain(
-			"pr-review-toolkit:type-design-analyzer",
-		);
-		expect(template.prompt).toContain("pr-review-toolkit:code-reviewer");
-		expect(template.prompt).toContain(
-			"pr-review-toolkit:code-simplifier",
-		);
+	it("references sub-agents", () => {
+		expect(template.prompt).toContain("comment-analyzer");
+		expect(template.prompt).toContain("pr-test-analyzer");
+		expect(template.prompt).toContain("silent-failure-hunter");
+		expect(template.prompt).toContain("type-design-analyzer");
+		expect(template.prompt).toContain("code-reviewer");
+		expect(template.prompt).toContain("code-simplifier");
 	});
 
 	it("defines review aspects", () => {

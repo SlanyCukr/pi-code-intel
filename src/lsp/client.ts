@@ -137,14 +137,37 @@ const CLIENT_CAPABILITIES = {
 	},
 };
 
+// Process-level singleton cache keyed by cwd.
+// All extension loads (parent + sub-agents) share the same manager and LSP processes.
+const managerInstances = new Map<string, LspClientManager>();
+
 export class LspClientManager {
 	private clients = new Map<string, LspClient>();
 	private initializing = new Map<string, Promise<LspClient>>();
 	private config: LspConfiguration;
 	private cwd: string;
 	private idleTimer: ReturnType<typeof setInterval> | null = null;
+	private warmedUp = false;
+	private refCount = 0;
 
-	constructor(config: LspConfiguration, cwd: string) {
+	/**
+	 * Get or create a singleton LspClientManager for the given cwd.
+	 * Subsequent calls with the same cwd return the same instance,
+	 * preventing duplicate LSP server processes across sub-agents.
+	 */
+	static getInstance(config: LspConfiguration, cwd: string): LspClientManager {
+		const existing = managerInstances.get(cwd);
+		if (existing) {
+			existing.refCount++;
+			return existing;
+		}
+		const manager = new LspClientManager(config, cwd);
+		manager.refCount = 1;
+		managerInstances.set(cwd, manager);
+		return manager;
+	}
+
+	private constructor(config: LspConfiguration, cwd: string) {
 		this.config = config;
 		this.cwd = cwd;
 		this.startIdleChecker();
@@ -153,10 +176,17 @@ export class LspClientManager {
 	/**
 	 * Start detected project servers and open source files so the server
 	 * builds a complete project index before the first tool call.
-	 * Errors are silently ignored — servers will be retried lazily on first use.
+	 * Skips if already warmed up (singleton dedup across sub-agents).
 	 */
 	async warmup(timeoutMs = 10_000): Promise<void> {
+		if (this.warmedUp) return;
+		this.warmedUp = true;
+
 		const detected = detectProjectServers(this.config, this.cwd);
+		if (detected.length === 0) {
+			console.error("[lsp] warmup: no servers detected");
+			return;
+		}
 		const promises = detected.map(async (name) => {
 			const serverConfig = this.config.servers[name];
 			if (!serverConfig || serverConfig.isLinter) return;
@@ -175,6 +205,7 @@ export class LspClientManager {
 				for (const file of files) {
 					await this.syncFile(client, file);
 				}
+				console.error(`[lsp] warmup: started ${name} (indexed ${files.length} files)`);
 			} catch (err) {
 				clearTimeout(timer!);
 				console.error(`[lsp] warmup failed for ${name}:`, err instanceof Error ? err.message : err);
@@ -672,9 +703,21 @@ export class LspClientManager {
 	}
 
 	/**
-	 * Shut down all LSP servers.
+	 * Release one reference. Only shuts down LSP servers when the last
+	 * reference is released (parent session), so sub-agents don't kill
+	 * shared servers.
 	 */
 	async shutdown(): Promise<void> {
+		if (this.refCount <= 0) {
+			console.error(`[lsp] shutdown called with refCount=${this.refCount} (already shut down?)`);
+			return;
+		}
+		this.refCount--;
+		if (this.refCount > 0) return;
+
+		// Last reference — actually shut down
+		managerInstances.delete(this.cwd);
+
 		if (this.idleTimer) {
 			clearInterval(this.idleTimer);
 			this.idleTimer = null;

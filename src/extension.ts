@@ -10,6 +10,7 @@ import { loadLspConfig } from "./lsp/config.js";
 import { LspClientManager } from "./lsp/client.js";
 import { createLspTool } from "./lsp/tool.js";
 import { createAgentTool } from "./agents/tool.js";
+import { isInSubAgent } from "./agents/runner.js";
 import { registerCommands } from "./commands/registry.js";
 import { createSearchTools } from "./search/tool.js";
 import { SemvexProcess } from "./search/process.js";
@@ -26,11 +27,16 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	const config = loadCodeIntelConfig(cwd);
 	const cleanupFns: Array<() => Promise<void>> = [];
 
-	// 0. Defer action-method calls (setActiveTools, registerCommand) to runtime.
-	// Pi does not allow action methods during extension loading — only registration
-	// methods (registerTool, on) are permitted in the factory function.
-	let runtimeInitDone = false;
+	// 0. Register slash commands eagerly so they appear in autocomplete at startup.
 	const hasAgents = config.agents.enabled;
+	if (hasAgents) {
+		registerCommands(pi);
+	}
+
+	// Defer action-method calls (setActiveTools) to runtime.
+	// Pi does not allow action methods during extension loading — only registration
+	// methods (registerTool, registerCommand, on) are permitted in the factory.
+	let runtimeInitDone = false;
 	pi.on("before_agent_start", () => {
 		if (runtimeInitDone) return;
 		runtimeInitDone = true;
@@ -48,18 +54,13 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 				piAny.setActiveTools([...active, ...missing]);
 			}
 		}
-
-		// Register slash commands (requires registerCommand action method)
-		if (hasAgents) {
-			registerCommands(pi);
-		}
 	});
 
 	// 1. LSP subsystem
 	let lspManager: LspClientManager | null = null;
 	if (config.lsp.enabled) {
 		const lspConfig = loadLspConfig(cwd);
-		lspManager = new LspClientManager(lspConfig, cwd);
+		lspManager = LspClientManager.getInstance(lspConfig, cwd);
 		const lspTool = createLspTool(lspManager, cwd);
 		pi.registerTool(lspTool);
 		cleanupFns.push(() => lspManager!.shutdown());
@@ -86,7 +87,9 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	}
 
 	// 3. Sub-agent subsystem
-	if (config.agents.enabled) {
+	// Skip agent tool registration inside sub-agent sessions — createAgentSession
+	// loads extensions by default, and we don't want sub-agents spawning nested agents.
+	if (config.agents.enabled && !isInSubAgent()) {
 		// Pass custom tool definitions so sub-agents can access them via createAgentSession
 		const registeredCustomTools: ToolDefinition[] = [];
 		// Re-create tools for sub-agent injection (they need fresh instances)

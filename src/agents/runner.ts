@@ -15,6 +15,13 @@ type AnyModel = import("@mariozechner/pi-ai").Model<any>;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Depth counter: prevents the extension from registering the agent tool
+// inside sub-agent sessions (createAgentSession loads extensions by default).
+let subAgentDepth = 0;
+export function isInSubAgent(): boolean {
+	return subAgentDepth > 0;
+}
+
 export interface AgentTemplate {
 	name: string;
 	category: string;
@@ -153,15 +160,20 @@ function templateNeedsWriteTools(template: AgentTemplate): boolean {
 }
 
 /**
- * Extract text content from agent messages.
+ * Extract the final report from agent messages.
+ *
+ * Takes only the last assistant message's text blocks — earlier messages
+ * are stream-of-consciousness narration, not the final report.
  */
-function extractTextFromMessages(
+export function extractFinalReport(
 	messages: Array<{ role: string; content: unknown }>,
 ): string {
-	const assistantMessages = messages.filter((m) => m.role === "assistant");
-	const parts: string[] = [];
+	// Walk backwards to find the last assistant message with text
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role !== "assistant") continue;
 
-	for (const msg of assistantMessages) {
+		const parts: string[] = [];
 		if (typeof msg.content === "string") {
 			parts.push(msg.content);
 		} else if (Array.isArray(msg.content)) {
@@ -174,9 +186,12 @@ function extractTextFromMessages(
 				}
 			}
 		}
+
+		const text = parts.join("\n\n").trim();
+		if (text) return text;
 	}
 
-	return parts.join("\n\n");
+	return "";
 }
 
 /**
@@ -184,7 +199,11 @@ function extractTextFromMessages(
  *
  * Creates an in-memory AgentSession, runs the task to completion,
  * extracts the output, and disposes the session.
+ *
+ * @param onProgress Optional callback invoked with status strings as the sub-agent executes tools.
  */
+export type ProgressCallback = (status: string) => void;
+
 export async function runSubAgent(
 	template: AgentTemplate,
 	task: string,
@@ -192,11 +211,18 @@ export async function runSubAgent(
 	parentModel: AnyModel | undefined,
 	customTools: CreateAgentSessionOptions["customTools"],
 	signal?: AbortSignal,
+	onProgress?: ProgressCallback,
 ): Promise<SubAgentResult> {
 	// Resolve model: "inherit" uses parent model, otherwise undefined (let SDK resolve)
 	const model: AnyModel | undefined =
 		template.model === "inherit" ? parentModel : undefined;
 
+	// Declare outside try so cleanup is accessible from catch/finally
+	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | null = null;
+	let unsub: (() => void) | null = null;
+	let abortHandler: (() => void) | null = null;
+
+	subAgentDepth++;
 	try {
 		// Select built-in tools based on template needs
 		const builtInTools = templateNeedsWriteTools(template)
@@ -208,13 +234,13 @@ export async function runSubAgent(
 			template.tools.includes(t.name),
 		);
 
-		const { session } = await createAgentSession({
+		({ session } = await createAgentSession({
 			cwd,
 			model,
 			tools: builtInTools,
 			customTools: filteredCustomTools,
 			sessionManager: SessionManager.inMemory(cwd),
-		});
+		}));
 
 		// Build system prompt: template prompt + code exploration guidance (if LSP/search available) + forward intelligence
 		const hasLsp = filteredCustomTools?.some((t) => t.name === "lsp") ?? false;
@@ -227,33 +253,47 @@ export async function runSubAgent(
 		const systemPrompt = `${template.systemPrompt}\n\n${extras.join("\n\n")}`;
 		session.agent.setSystemPrompt(systemPrompt);
 
+		// Stream progress via session events
+		let toolCount = 0;
+		let currentTool = "";
+		unsub = session.subscribe((event: { type: string; toolName?: string; toolCallId?: string }) => {
+			if (!onProgress) return;
+			if (event.type === "tool_execution_start") {
+				toolCount++;
+				currentTool = event.toolName ?? "";
+				onProgress(`tool ${toolCount}: ${currentTool}`);
+			} else if (event.type === "tool_execution_end") {
+				onProgress(`tool ${toolCount}: ${currentTool} done`);
+			}
+		});
+
 		// Abort if signal fires
 		if (signal) {
-			signal.addEventListener(
-				"abort",
-				() => {
-					session.abort();
-				},
-				{ once: true },
-			);
+			abortHandler = () => session?.abort();
+			signal.addEventListener("abort", abortHandler, { once: true });
 		}
 
 		// Run the task
 		await session.prompt(task);
 
-		// Extract output from all assistant messages
-		const output = extractTextFromMessages(
+		// Extract the final report from the last assistant message
+		const output = extractFinalReport(
 			session.messages as Array<{ role: string; content: unknown }>,
 		);
-
-		// Clean up
-		session.dispose();
 
 		return {
 			output: output || "Sub-agent completed with no text output.",
 		};
 	} catch (err) {
+		console.error(`[code-intel] Sub-agent ${template.name} failed:`, err);
 		const message = err instanceof Error ? err.message : String(err);
 		return { output: "", error: `Sub-agent error: ${message}` };
+	} finally {
+		unsub?.();
+		if (signal && abortHandler) {
+			signal.removeEventListener("abort", abortHandler);
+		}
+		session?.dispose();
+		subAgentDepth--;
 	}
 }

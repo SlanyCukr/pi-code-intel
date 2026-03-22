@@ -69,7 +69,7 @@ export function createAgentTool(
 			_toolCallId: string,
 			input: AgentInput,
 			signal: AbortSignal | undefined,
-			_onUpdate: AgentToolUpdateCallback | undefined,
+			onUpdate: AgentToolUpdateCallback | undefined,
 			ctx: ExtensionContext,
 		): Promise<AgentToolResult<unknown>> {
 			const template = getTemplate(input.type);
@@ -82,6 +82,25 @@ export function createAgentTool(
 				);
 			}
 
+			// Emit initial progress so the TUI shows what's running
+			const taskPreview = input.task.length > 120
+				? `${input.task.slice(0, 120)}…`
+				: input.task;
+			onUpdate?.({
+				content: [{ type: "text" as const, text: `[${input.type}] ${taskPreview}` }],
+				details: undefined,
+			});
+
+			// Stream tool execution progress
+			const onProgress = onUpdate
+				? (status: string) => {
+						onUpdate({
+							content: [{ type: "text" as const, text: `[${input.type}] ${status}` }],
+							details: undefined,
+						});
+					}
+				: undefined;
+
 			const result = await runSubAgent(
 				template,
 				input.task,
@@ -89,6 +108,7 @@ export function createAgentTool(
 				ctx.model,
 				customTools,
 				signal,
+				onProgress,
 			);
 
 			if (result.error) {

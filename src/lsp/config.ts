@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServerConfig } from "./types.js";
 
@@ -119,7 +119,25 @@ export function resolveCommand(
 }
 
 /**
- * Check if a project has root markers for any language server.
+ * Check whether a command binary is available locally or on PATH.
+ * Reuses resolveCommand for local paths; additionally checks system PATH.
+ */
+function isCommandAvailable(serverConfig: ServerConfig, cwd: string): boolean {
+	const resolved = resolveCommand(serverConfig, cwd);
+	// resolveCommand returns a local path if found, otherwise the bare command name
+	if (resolved.command !== serverConfig.command) return true;
+
+	// Check system PATH
+	const pathDirs = (process.env.PATH ?? "").split(delimiter);
+	for (const dir of pathDirs) {
+		if (existsSync(join(dir, serverConfig.command))) return true;
+	}
+	return false;
+}
+
+/**
+ * Check if a project has root markers for any language server
+ * and the server command is available.
  */
 export function detectProjectServers(
 	config: LspConfiguration,
@@ -135,7 +153,11 @@ export function detectProjectServers(
 				continue;
 			}
 			if (existsSync(join(cwd, marker))) {
-				detected.push(name);
+				if (isCommandAvailable(server, cwd)) {
+					detected.push(name);
+				} else {
+					console.error(`[lsp] warmup: skipped ${name} (${server.command} not found)`);
+				}
 				break;
 			}
 		}
