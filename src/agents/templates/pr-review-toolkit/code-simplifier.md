@@ -3,7 +3,7 @@ name: code-simplifier
 category: pr-review-toolkit
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality
 model: opus
-tools: [read, write, edit, grep, find, ls, lsp, search_code, bash]
+tools: [read, write, edit, grep, find, ls, lsp, search_code, search_docs, bash]
 ---
 
 # Role
@@ -37,3 +37,6 @@ You are a code simplifier. You refine code for clarity, consistency, and maintai
 ## Output Format
 
 For each simplification applied, briefly explain what was changed and why.
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next

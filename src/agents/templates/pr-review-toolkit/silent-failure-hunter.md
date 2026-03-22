@@ -3,7 +3,7 @@ name: silent-failure-hunter
 category: pr-review-toolkit
 description: Identifies silent failures, inadequate error handling, and inappropriate fallback behavior in code changes
 model: inherit
-tools: [read, grep, find, ls, lsp, search_code]
+tools: [read, grep, find, ls, lsp, search_code, search_docs]
 ---
 
 # Role
@@ -37,3 +37,6 @@ Pattern: description of what the code does
 Risk: what could go wrong silently
 Recommendation: how to fix it
 ```
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next

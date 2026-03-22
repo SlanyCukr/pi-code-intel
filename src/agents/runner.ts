@@ -8,6 +8,7 @@ import {
 	createCodingTools,
 	createReadOnlyTools,
 } from "@mariozechner/pi-coding-agent";
+import { buildCodeExplorationGuidance } from "../prompt/code-exploration.js";
 // Model<any> is the canonical type used throughout pi-coding-agent
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyModel = import("@mariozechner/pi-ai").Model<any>;
@@ -29,6 +30,15 @@ export interface SubAgentResult {
 }
 
 const VALID_MODELS = ["sonnet", "opus", "inherit"] as const;
+
+const FORWARD_INTELLIGENCE = `<instruction>
+## Forward intelligence
+
+When relevant, note in your output:
+- Insights that would prevent rework for whoever acts on your findings
+- Fragile spots — thin implementations or assumptions that may break under change
+- Surprises — where reality differed from what you expected
+</instruction>`;
 
 // Template cache
 let templateCache: Map<string, AgentTemplate> | null = null;
@@ -201,8 +211,16 @@ export async function runSubAgent(
 			sessionManager: SessionManager.inMemory(cwd),
 		});
 
-		// Set the system prompt on the agent
-		session.agent.setSystemPrompt(template.systemPrompt);
+		// Build system prompt: template prompt + shared guidance
+		const hasLsp = filteredCustomTools?.some((t) => t.name === "lsp") ?? false;
+		const hasSearch =
+			filteredCustomTools?.some((t) => t.name === "search_code") ?? false;
+		const codeExploration = buildCodeExplorationGuidance(hasLsp, hasSearch);
+		const extras: string[] = [];
+		if (codeExploration) extras.push(codeExploration);
+		extras.push(FORWARD_INTELLIGENCE);
+		const systemPrompt = `${template.systemPrompt}\n\n${extras.join("\n\n")}`;
+		session.agent.setSystemPrompt(systemPrompt);
 
 		// Abort if signal fires
 		if (signal) {

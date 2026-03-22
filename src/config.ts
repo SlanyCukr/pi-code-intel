@@ -8,6 +8,7 @@ export interface CodeIntelConfig {
 	search: {
 		enabled: boolean;
 		command: string;
+		args?: string[];
 	};
 	agents: {
 		enabled: boolean;

@@ -10,6 +10,7 @@ import { loadLspConfig } from "./lsp/config.js";
 import { LspClientManager } from "./lsp/client.js";
 import { createLspTool } from "./lsp/tool.js";
 import { createAgentTool } from "./agents/tool.js";
+import { registerCommands } from "./commands/registry.js";
 import { createSearchTools } from "./search/tool.js";
 import { SemvexProcess } from "./search/process.js";
 import { buildSystemPrompt } from "./prompt/system-prompt.js";
@@ -25,6 +26,17 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	const config = loadCodeIntelConfig(cwd);
 	const cleanupFns: Array<() => Promise<void>> = [];
 
+	// 0. Ensure grep, find, ls are active (pi defaults to read/bash/edit/write only)
+	const piAny = pi as any;
+	if (typeof piAny.getActiveTools === "function" && typeof piAny.setActiveTools === "function") {
+		const active: string[] = piAny.getActiveTools();
+		const needed = ["grep", "find", "ls"];
+		const missing = needed.filter((t) => !active.includes(t));
+		if (missing.length > 0) {
+			piAny.setActiveTools([...active, ...missing]);
+		}
+	}
+
 	// 1. LSP subsystem
 	let lspManager: LspClientManager | null = null;
 	if (config.lsp.enabled) {
@@ -33,11 +45,13 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		const lspTool = createLspTool(lspManager, cwd);
 		pi.registerTool(lspTool);
 		cleanupFns.push(() => lspManager!.shutdown());
+		// Start detected servers in background so they can index the workspace
+		lspManager.warmup().catch(() => {});
 	}
 
 	// 2. Semantic search subsystem
 	if (config.search.enabled) {
-		const semvex = new SemvexProcess(cwd, config.search.command);
+		const semvex = new SemvexProcess(cwd, config.search.command, config.search.args);
 		const [searchCodeTool, searchDocsTool] = createSearchTools(semvex);
 		pi.registerTool(searchCodeTool);
 		pi.registerTool(searchDocsTool);
@@ -55,7 +69,7 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 			);
 		}
 		if (config.search.enabled) {
-			const semvexForAgents = new SemvexProcess(cwd, config.search.command);
+			const semvexForAgents = new SemvexProcess(cwd, config.search.command, config.search.args);
 			const [sc, sd] = createSearchTools(semvexForAgents);
 			registeredCustomTools.push(sc as unknown as ToolDefinition);
 			registeredCustomTools.push(sd as unknown as ToolDefinition);
@@ -63,6 +77,9 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		}
 		const agentTool = createAgentTool(registeredCustomTools);
 		pi.registerTool(agentTool);
+
+		// Register slash commands that orchestrate sub-agents
+		registerCommands(pi);
 	}
 
 	// 4. System prompt — fully replace pi's default

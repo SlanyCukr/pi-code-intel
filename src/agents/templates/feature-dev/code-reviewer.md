@@ -2,8 +2,8 @@
 name: code-reviewer
 category: feature-dev
 description: Reviews code for bugs, logic errors, security vulnerabilities, code quality issues, and adherence to project conventions
-model: sonnet
-tools: [read, grep, find, ls, lsp, search_code]
+model: opus
+tools: [read, grep, find, ls, lsp, search_code, search_docs]
 ---
 
 # Role
@@ -35,3 +35,6 @@ Suggested fix (if applicable)
 ```
 
 End with a summary: total issues found by severity.
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next

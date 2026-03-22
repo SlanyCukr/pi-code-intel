@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { resolve, join, extname } from "node:path";
 import {
 	type LspConfiguration,
+	detectProjectServers,
 	getServersForFile,
 	resolveCommand,
 } from "./config.js";
@@ -18,6 +19,46 @@ import { fileToUri, getLanguageId } from "./utils.js";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const IDLE_CHECK_INTERVAL_MS = 60 * 1000; // 1 minute
+const MAX_WARMUP_FILES = 200;
+const SKIP_DIRS = new Set([
+	"node_modules", "dist", ".git", ".hg", ".svn", "build", "out",
+	"__pycache__", ".tox", ".venv", "venv", "target", ".next",
+	".nuxt", "coverage", ".cache",
+]);
+
+function collectSourceFiles(
+	root: string,
+	extensions: Set<string>,
+	maxFiles = MAX_WARMUP_FILES,
+): string[] {
+	const files: string[] = [];
+	const walk = (dir: string) => {
+		if (files.length >= maxFiles) return;
+		let entries: string[];
+		try {
+			entries = readdirSync(dir);
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (files.length >= maxFiles) return;
+			if (SKIP_DIRS.has(entry)) continue;
+			const full = join(dir, entry);
+			try {
+				const stat = statSync(full);
+				if (stat.isDirectory()) {
+					walk(full);
+				} else if (stat.isFile() && extensions.has(extname(full))) {
+					files.push(full);
+				}
+			} catch {
+				// Skip inaccessible files
+			}
+		}
+	};
+	walk(root);
+	return files;
+}
 
 const CLIENT_CAPABILITIES = {
 	textDocument: {
@@ -84,6 +125,36 @@ export class LspClientManager {
 		this.config = config;
 		this.cwd = cwd;
 		this.startIdleChecker();
+	}
+
+	/**
+	 * Start detected project servers and open source files so the server
+	 * builds a complete project index before the first tool call.
+	 * Errors are silently ignored — servers will be retried lazily on first use.
+	 */
+	async warmup(timeoutMs = 10_000): Promise<void> {
+		const detected = detectProjectServers(this.config, this.cwd);
+		const promises = detected.map(async (name) => {
+			const serverConfig = this.config.servers[name];
+			if (!serverConfig || serverConfig.isLinter) return;
+			try {
+				const client = await Promise.race([
+					this.getOrCreate(name, serverConfig),
+					new Promise<never>((_, reject) =>
+						setTimeout(() => reject(new Error("timeout")), timeoutMs),
+					),
+				]);
+				// Open project source files so the server indexes them
+				const exts = new Set(serverConfig.fileTypes);
+				const files = collectSourceFiles(this.cwd, exts);
+				for (const file of files) {
+					await this.syncFile(client, file);
+				}
+			} catch {
+				// Server failed to start or timed out — will be retried lazily
+			}
+		});
+		await Promise.allSettled(promises);
 	}
 
 	/**

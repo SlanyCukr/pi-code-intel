@@ -2,7 +2,7 @@
 name: code-architect
 category: feature-dev
 description: Designs feature architectures by analyzing existing codebase patterns and conventions, then providing comprehensive implementation blueprints
-model: sonnet
+model: opus
 tools: [read, grep, find, ls, lsp, search_code, search_docs]
 ---
 
@@ -34,3 +34,6 @@ Provide your architecture design as:
 - Ordered list of implementation steps
 - Dependencies between steps
 - Which files to create/modify at each step
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next

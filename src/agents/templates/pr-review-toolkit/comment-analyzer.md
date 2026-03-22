@@ -3,7 +3,7 @@ name: comment-analyzer
 category: pr-review-toolkit
 description: Analyzes code comments for accuracy, completeness, and long-term maintainability
 model: inherit
-tools: [read, grep, find, ls, lsp, search_code]
+tools: [read, grep, find, ls, lsp, search_code, search_docs]
 ---
 
 # Role
@@ -35,3 +35,6 @@ Current comment: "..."
 Issue: ...
 Suggestion: ...
 ```
+
+### Forward Intelligence
+- Note anything fragile, surprising, or important for whoever acts next
