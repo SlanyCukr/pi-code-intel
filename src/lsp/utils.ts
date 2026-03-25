@@ -1,19 +1,17 @@
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
-import {
-	type CallHierarchyIncomingCall,
-	type CallHierarchyOutgoingCall,
-	type Diagnostic,
-	DiagnosticSeverity,
-	type DocumentSymbol,
-	type Hover,
-	type Location,
-	type LocationLink,
-	type MarkupContent,
-	type Position,
-	SymbolKind,
-	type SymbolInformation,
+import type {
+	CallHierarchyIncomingCall,
+	CallHierarchyOutgoingCall,
+	Diagnostic,
+	DocumentSymbol,
+	Hover,
+	Location,
+	LocationLink,
+	Position,
+	SymbolInformation,
 } from "./types.js";
+import { DiagnosticSeverity, SymbolKind } from "./types.js";
 
 // URI <-> Path conversion
 
@@ -140,12 +138,15 @@ export function formatLocations(
 		grouped.get(file)!.push(loc);
 	}
 
+	if (grouped.size === 1) {
+		const [, locs] = [...grouped][0];
+		const lines = locs.map((loc) => `  ${formatSingleLocation(loc, cwd)}`);
+		return `Found ${locations.length} result(s):\n${lines.join("\n")}`;
+	}
+
 	const parts: string[] = [];
 	for (const [file, locs] of grouped) {
 		const lines = locs.map((loc) => `  ${formatSingleLocation(loc, cwd)}`);
-		if (grouped.size === 1) {
-			return `Found ${locations.length} result(s):\n${lines.join("\n")}`;
-		}
 		parts.push(`${file}:\n${lines.join("\n")}`);
 	}
 	return `Found ${locations.length} result(s) in ${grouped.size} files:\n${parts.join("\n")}`;
@@ -210,11 +211,13 @@ export function formatDiagnostic(
 	return `${file}:${line}:${col} [${severity}]${code}${source}: ${diag.message}`;
 }
 
+const MAX_DIAGNOSTIC_MESSAGES = 50;
+
 export function formatDiagnostics(
 	diagnosticsMap: Map<string, Diagnostic[]>,
 	cwd: string,
-	maxMessages = 50,
 ): string {
+	const maxMessages = MAX_DIAGNOSTIC_MESSAGES;
 	const allDiags: { file: string; diag: Diagnostic }[] = [];
 	for (const [uriOrPath, diags] of diagnosticsMap) {
 		// Keys from LSP are URIs — convert to file paths
@@ -336,7 +339,7 @@ export function formatHover(hover: Hover | null): string {
 		return hover.contents || "No hover information available.";
 	}
 
-	const content = (hover.contents as MarkupContent).value;
+	const content = hover.contents.value;
 	return content || "No hover information available.";
 }
 
@@ -403,8 +406,11 @@ export function resolveSymbolPosition(
 				return { line: zeroLine, character: idx };
 			}
 		}
-	} catch {
-		// Fall through to default
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT") {
+			console.error(`[lsp] resolveSymbolPosition: failed to read ${filePath}:`, err instanceof Error ? err.message : err);
+		}
 	}
 
 	return { line: zeroLine, character: 0 };

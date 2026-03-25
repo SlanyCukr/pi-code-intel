@@ -12,6 +12,7 @@ import type {
 	Hover,
 	Location,
 	LocationLink,
+	Position,
 	SymbolInformation,
 	WorkspaceEdit,
 } from "./types.js";
@@ -88,6 +89,8 @@ const lspSchema = Type.Object(
 
 type LspInput = Static<typeof lspSchema>;
 
+export const LSP_TOOL_NAME = "lsp";
+
 const LSP_DESCRIPTION = `Language Server Protocol tool for code intelligence operations.
 
 Actions:
@@ -96,9 +99,9 @@ Actions:
 - implementation: Find implementations of an interface/abstract (requires file, line, symbol)
 - references: Find all references to a symbol (requires file, line, symbol)
 - hover: Get type info and documentation for a symbol (requires file, line, symbol)
-- diagnostics: Get compiler errors/warnings (requires file; omit file for workspace diagnostics)
+- diagnostics: Get compiler errors/warnings (requires file)
 - document_symbols: List all symbols in a file (requires file)
-- workspace_symbols: Search for symbols across the workspace (requires query)
+- workspace_symbols: Search for symbols across the workspace (requires file, query)
 - incoming_calls: Find all callers of a function (requires file, line, symbol)
 - outgoing_calls: Find all functions called by a function (requires file, line, symbol)
 - rename: Rename a symbol across the codebase (requires file, line, symbol, new_name)
@@ -111,7 +114,7 @@ export function createLspTool(
 	cwd: string,
 ): ToolDefinition<typeof lspSchema> {
 	return {
-		name: "lsp",
+		name: LSP_TOOL_NAME,
 		label: "LSP",
 		description: LSP_DESCRIPTION,
 		parameters: lspSchema,
@@ -175,11 +178,22 @@ async function executeLspAction(
 
 	const uri = fileToUri(filePath);
 
+	// Position-based actions share the same setup
+	const POSITION_ACTIONS = new Set([
+		"hover", "definition", "type_definition", "implementation",
+		"references", "incoming_calls", "outgoing_calls", "rename", "code_actions",
+	]);
+
+	let pos: Position | undefined;
+	if (POSITION_ACTIONS.has(action)) {
+		if (!input.line) throw new Error(`line is required for ${action}`);
+		pos = resolveSymbolPosition(filePath, input.line, input.symbol);
+	}
+
 	const DIAGNOSTICS_SETTLE_MS = 500;
 
 	switch (action) {
 		case "diagnostics": {
-			// Wait briefly for diagnostics to arrive after sync
 			await new Promise((r) => setTimeout(r, DIAGNOSTICS_SETTLE_MS));
 			const diags = manager.getDiagnostics(client, filePath);
 			return formatDiagnostics(diags, cwd);
@@ -197,16 +211,10 @@ async function executeLspAction(
 		}
 
 		case "hover": {
-			if (!input.line) throw new Error("line is required for hover");
-			const pos = resolveSymbolPosition(
-				filePath,
-				input.line,
-				input.symbol,
-			);
 			const hover = (await manager.sendRequest(
 				client,
 				"textDocument/hover",
-				{ textDocument: { uri }, position: pos },
+				{ textDocument: { uri }, position: pos! },
 				signal,
 			)) as Hover | null;
 
@@ -216,13 +224,6 @@ async function executeLspAction(
 		case "definition":
 		case "type_definition":
 		case "implementation": {
-			if (!input.line) throw new Error(`line is required for ${action}`);
-			const pos = resolveSymbolPosition(
-				filePath,
-				input.line,
-				input.symbol,
-			);
-
 			const methodMap = {
 				definition: "textDocument/definition",
 				type_definition: "textDocument/typeDefinition",
@@ -232,7 +233,7 @@ async function executeLspAction(
 			const result = (await manager.sendRequest(
 				client,
 				methodMap[action],
-				{ textDocument: { uri }, position: pos },
+				{ textDocument: { uri }, position: pos! },
 				signal,
 			)) as Location | Location[] | LocationLink[] | null;
 
@@ -240,7 +241,6 @@ async function executeLspAction(
 			const locations = Array.isArray(result) ? result : [result];
 			if (locations.length === 0) return "No results found.";
 
-			// Show context for up to 5 results
 			if (locations.length <= 5) {
 				return locations
 					.map((loc) => formatLocationWithContext(loc, cwd))
@@ -250,19 +250,12 @@ async function executeLspAction(
 		}
 
 		case "references": {
-			if (!input.line) throw new Error("line is required for references");
-			const pos = resolveSymbolPosition(
-				filePath,
-				input.line,
-				input.symbol,
-			);
-
 			const refs = (await manager.sendRequest(
 				client,
 				"textDocument/references",
 				{
 					textDocument: { uri },
-					position: pos,
+					position: pos!,
 					context: { includeDeclaration: true },
 				},
 				signal,
@@ -273,18 +266,10 @@ async function executeLspAction(
 
 		case "incoming_calls":
 		case "outgoing_calls": {
-			if (!input.line) throw new Error(`line is required for ${action}`);
-			const pos = resolveSymbolPosition(
-				filePath,
-				input.line,
-				input.symbol,
-			);
-
-			// First, prepare call hierarchy
 			const items = (await manager.sendRequest(
 				client,
 				"textDocument/prepareCallHierarchy",
-				{ textDocument: { uri }, position: pos },
+				{ textDocument: { uri }, position: pos! },
 				signal,
 			)) as CallHierarchyItem[] | null;
 
@@ -293,10 +278,10 @@ async function executeLspAction(
 
 			const item = items[0];
 
-			const callMethodMap: Record<string, string> = {
+			const callMethodMap = {
 				incoming_calls: "callHierarchy/incomingCalls",
 				outgoing_calls: "callHierarchy/outgoingCalls",
-			};
+			} as const;
 			const calls = (await manager.sendRequest(
 				client,
 				callMethodMap[action],
@@ -312,20 +297,14 @@ async function executeLspAction(
 		}
 
 		case "rename": {
-			if (!input.line) throw new Error("line is required for rename");
 			if (!input.new_name) throw new Error("new_name is required for rename");
-			const pos = resolveSymbolPosition(
-				filePath,
-				input.line,
-				input.symbol,
-			);
 
 			const edit = (await manager.sendRequest(
 				client,
 				"textDocument/rename",
 				{
 					textDocument: { uri },
-					position: pos,
+					position: pos!,
 					newName: input.new_name,
 				},
 				signal,
@@ -333,7 +312,6 @@ async function executeLspAction(
 
 			if (!edit) return "Rename not supported at this location.";
 
-			// Count affected files
 			let fileCount = 0;
 			if (edit.changes) {
 				fileCount = Object.keys(edit.changes).length;
@@ -345,19 +323,11 @@ async function executeLspAction(
 		}
 
 		case "code_actions": {
-			if (!input.line) throw new Error("line is required for code_actions");
-			const pos = resolveSymbolPosition(
-				filePath,
-				input.line,
-				input.symbol,
-			);
-
-			// Get diagnostics at this line
 			const fileDiags = manager.getDiagnostics(client, filePath);
 			const lineDiags: Diagnostic[] = [];
 			for (const diags of fileDiags.values()) {
 				for (const d of diags) {
-					if (d.range.start.line === pos.line) {
+					if (d.range.start.line === pos!.line) {
 						lineDiags.push(d);
 					}
 				}
@@ -368,7 +338,7 @@ async function executeLspAction(
 				"textDocument/codeAction",
 				{
 					textDocument: { uri },
-					range: { start: pos, end: pos },
+					range: { start: pos!, end: pos! },
 					context: { diagnostics: lineDiags },
 				},
 				signal,

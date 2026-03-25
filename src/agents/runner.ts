@@ -9,8 +9,26 @@ import {
 	createReadOnlyTools,
 } from "@mariozechner/pi-coding-agent";
 import { buildCodeExplorationGuidance } from "../prompt/code-exploration.js";
-import { BASH_GUIDANCE, FORWARD_INTELLIGENCE } from "../prompt/subagent-prompt.js";
+import { LSP_TOOL_NAME } from "../lsp/tool.js";
 import { rtkSpawnHook } from "../rtk.js";
+
+const BASH_GUIDANCE = `<instruction>
+## Bash usage
+
+- Bash commands already execute in the project root directory. Prefixing with \`cd /path/to/project &&\` is redundant — it wastes tokens and clutters the command.
+- Bash output is automatically compressed for token efficiency. grep and find via bash automatically respect .gitignore — you do not need \`--exclude-dir\` or manual filtering.
+- Use bash for: grep, find, ls, git commands, npm/build commands, ast-grep, and other shell operations.
+- When you need to understand code structure or find where something is defined/used, prefer lsp — it returns precise, structural results in a single call.
+</instruction>`;
+
+const FORWARD_INTELLIGENCE = `<instruction>
+## Forward intelligence
+
+When relevant, note in your output:
+- Insights that would prevent rework for whoever acts on your findings
+- Fragile spots — thin implementations or assumptions that may break under change
+- Surprises — where reality differed from what you expected
+</instruction>`;
 import type { AgentTemplate } from "./templates.js";
 import { templateNeedsWriteTools } from "./templates.js";
 // Model<any> is the canonical type used throughout pi-coding-agent
@@ -70,7 +88,7 @@ export function extractFinalReport(
  * Write agents get the full coding toolset. Read-only agents get read tools
  * plus bash (if declared). RTK spawn hook wraps all bash invocations.
  */
-function selectBuiltInTools(template: AgentTemplate, cwd: string) {
+function createBuiltInTools(template: AgentTemplate, cwd: string) {
 	const rtkBashOpts = { bash: { spawnHook: rtkSpawnHook } };
 	if (templateNeedsWriteTools(template)) {
 		return createCodingTools(cwd, rtkBashOpts);
@@ -91,7 +109,7 @@ function buildSubAgentSystemPrompt(
 	template: AgentTemplate,
 	filteredCustomTools: CreateAgentSessionOptions["customTools"],
 ): string {
-	const hasLsp = filteredCustomTools?.some((t) => t.name === "lsp") ?? false;
+	const hasLsp = filteredCustomTools?.some((t) => t.name === LSP_TOOL_NAME) ?? false;
 	const codeExploration = buildCodeExplorationGuidance(hasLsp);
 	const extras: string[] = [];
 	if (template.tools.includes("bash")) extras.push(BASH_GUIDANCE);
@@ -119,8 +137,6 @@ function createSessionStorage(cwd: string, parentSessionDir?: string): SessionMa
 	return SessionManager.inMemory(cwd);
 }
 
-type ProgressCallback = (status: string) => void;
-
 interface RunSubAgentOptions {
 	template: AgentTemplate;
 	task: string;
@@ -128,7 +144,7 @@ interface RunSubAgentOptions {
 	parentModel: AnyModel | undefined;
 	customTools: CreateAgentSessionOptions["customTools"];
 	signal?: AbortSignal;
-	onProgress?: ProgressCallback;
+	onProgress?: (status: string) => void;
 	parentSessionDir?: string;
 }
 
@@ -152,7 +168,7 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
 
 	subAgentDepth++;
 	try {
-		const builtInTools = selectBuiltInTools(template, cwd);
+		const builtInTools = createBuiltInTools(template, cwd);
 		const filteredCustomTools = customTools?.filter((t) =>
 			template.tools.includes(t.name),
 		);

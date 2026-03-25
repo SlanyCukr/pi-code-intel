@@ -51,6 +51,7 @@ interface JsonRpcNotification {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const SHUTDOWN_TIMEOUT_MS = 5_000;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const IDLE_CHECK_INTERVAL_MS = 60 * 1000; // 1 minute
 const MAX_WARMUP_FILES = 200;
@@ -273,18 +274,15 @@ export class LspClientManager {
 		serverConfig: ServerConfig,
 		signal?: AbortSignal,
 	): Promise<LspClient> {
-		// Already running
 		const existing = this.clients.get(serverName);
 		if (existing) {
 			existing.lastUsed = Date.now();
 			return existing;
 		}
 
-		// Already initializing — wait for it
 		const pending = this.initializing.get(serverName);
 		if (pending) return pending;
 
-		// Create new
 		const promise = this.spawnAndInitialize(serverName, serverConfig, signal);
 		this.initializing.set(serverName, promise);
 
@@ -728,7 +726,7 @@ export class LspClientManager {
 	): Promise<void> {
 		try {
 			// Send shutdown request
-			await this.sendRequest(client, "shutdown", null, undefined, 5000);
+			await this.sendRequest(client, "shutdown", null, undefined, SHUTDOWN_TIMEOUT_MS);
 			// Send exit notification
 			this.sendNotification(client, "exit", null);
 		} catch (err) {

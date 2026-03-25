@@ -112,6 +112,14 @@ export function loadTemplates(): Map<string, AgentTemplate> {
 }
 
 /**
+ * Reset the template cache so the next loadTemplates() call re-reads from disk.
+ * Intended for test isolation.
+ */
+export function resetTemplateCache(): void {
+	templateCache = null;
+}
+
+/**
  * Get a template by its full name (category:name).
  */
 export function getTemplate(fullName: string): AgentTemplate | null {

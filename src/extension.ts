@@ -10,7 +10,7 @@ import {
 import { loadCodeIntelConfig } from "./config.js";
 import { loadLspConfig } from "./lsp/config.js";
 import { LspClientManager } from "./lsp/client.js";
-import { createLspTool } from "./lsp/tool.js";
+import { LSP_TOOL_NAME, createLspTool } from "./lsp/tool.js";
 import { createAgentTool } from "./agents/tool.js";
 import { isInSubAgent } from "./agents/runner.js";
 import { registerCommands } from "./commands/registry.js";
@@ -82,7 +82,7 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 
 			return {
 				systemPrompt: buildSystemPrompt({
-					hasLsp: activeToolNames.includes("lsp"),
+					hasLsp: activeToolNames.includes(LSP_TOOL_NAME),
 					hasAgent: activeToolNames.includes("agent"),
 					activeTools: activeToolNames,
 					toolSnippets,

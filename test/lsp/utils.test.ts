@@ -218,8 +218,8 @@ describe("formatDiagnostics", () => {
 		expect(errorIdx).toBeLessThan(warnIdx);
 	});
 
-	it("respects maxMessages", () => {
-		const diags = Array.from({ length: 10 }, (_, i) => ({
+	it("truncates at max messages", () => {
+		const diags = Array.from({ length: 60 }, (_, i) => ({
 			range: {
 				start: { line: i, character: 0 },
 				end: { line: i, character: 0 },
@@ -228,8 +228,8 @@ describe("formatDiagnostics", () => {
 			message: `Error ${i}`,
 		}));
 		const map = new Map([["file:///p/file.ts", diags]]);
-		const result = formatDiagnostics(map, "/p", 3);
-		expect(result).toContain("showing first 3");
+		const result = formatDiagnostics(map, "/p");
+		expect(result).toContain("showing first 50");
 	});
 });
 

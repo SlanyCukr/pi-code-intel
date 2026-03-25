@@ -59,7 +59,7 @@ Use `/read-session <path>` to parse and summarize a session file (runs `scripts/
 ```
 extension.ts → config.ts, lsp/*, agents/*, commands/*, prompt/*, rtk.ts
 agents/tool.ts → agents/runner.ts, agents/templates.ts
-agents/runner.ts → agents/templates.ts, prompt/code-exploration.ts, prompt/subagent-prompt.ts, rtk.ts
+agents/runner.ts → agents/templates.ts, prompt/code-exploration.ts, lsp/tool.ts, rtk.ts
 agents/templates.ts → utils/frontmatter.ts, utils/templates.ts
 commands/registry.ts → agents/templates.ts, utils/frontmatter.ts, utils/templates.ts
 lsp/tool.ts → lsp/client.ts → lsp/config.ts, lsp/utils.ts, lsp/types.ts
