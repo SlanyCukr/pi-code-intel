@@ -75,8 +75,8 @@ describe("feature-dev template", () => {
 		expect(template.prompt).toContain("$ARGUMENTS");
 	});
 
-	it("references all 7 phases", () => {
-		for (let i = 1; i <= 7; i++) {
+	it("references all 8 phases", () => {
+		for (let i = 1; i <= 8; i++) {
 			expect(template.prompt).toContain(`Phase ${i}`);
 		}
 	});
@@ -85,6 +85,7 @@ describe("feature-dev template", () => {
 		expect(template.prompt).toContain("code-explorer");
 		expect(template.prompt).toContain("code-architect");
 		expect(template.prompt).toContain("code-reviewer");
+		expect(template.prompt).toContain("intent-reviewer");
 	});
 
 	it("has user checkpoints", () => {
@@ -96,6 +97,12 @@ describe("feature-dev template", () => {
 		);
 		expect(template.prompt).toContain(
 			"Ask user which approach they prefer",
+		);
+		expect(template.prompt).toContain(
+			"Wait for explicit user approval before proceeding",
+		);
+		expect(template.prompt).toContain(
+			"DO NOT START WITHOUT USER APPROVAL ON THE INTENT DOCUMENT",
 		);
 	});
 
@@ -132,6 +139,7 @@ describe("review-pr template", () => {
 		expect(template.prompt).toContain("type-design-analyzer");
 		expect(template.prompt).toContain("code-reviewer");
 		expect(template.prompt).toContain("code-simplifier");
+		expect(template.prompt).toContain("intent-reviewer");
 	});
 
 	it("defines review aspects", () => {
@@ -142,6 +150,7 @@ describe("review-pr template", () => {
 			"types",
 			"code",
 			"simplify",
+			"intent",
 		];
 		for (const aspect of aspects) {
 			expect(template.prompt).toContain(`**${aspect}**`);

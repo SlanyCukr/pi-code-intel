@@ -1,6 +1,6 @@
 # pi-code-intel
 
-A [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) extension that adds LSP support, sub-agents, semantic code search, and a code intelligence workflow.
+A [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) extension that adds LSP support, sub-agents, and a code intelligence workflow.
 
 ## Install
 
@@ -41,25 +41,6 @@ Code intelligence via language servers. Supports 34 languages out of the box.
 
 Language servers are auto-discovered. The tool checks `node_modules/.bin/`, `.venv/bin/`, and system PATH.
 
-### `search_code` — Semantic Code Search
-
-Search the codebase by meaning, not just text patterns. Powered by [semvex](https://github.com/your/semvex-mcp).
-
-```
-search_code({ query: "authentication middleware" })
-search_code({ query: "database connection pooling", language: "python" })
-```
-
-Requires semvex-mcp running with vLLM and Qdrant backends. Falls back gracefully when unavailable.
-
-### `search_docs` — Documentation Search
-
-Search project documentation (README, guides, API docs) semantically.
-
-```
-search_docs({ query: "how to configure the build" })
-```
-
 ### `agent` — Sub-agents
 
 Delegate tasks to specialized agents that run independently and return results.
@@ -68,33 +49,30 @@ Delegate tasks to specialized agents that run independently and return results.
 
 | Type | Model | Description |
 |------|-------|-------------|
-| `feature-dev:code-architect` | sonnet | Design feature architectures and implementation blueprints |
+| `feature-dev:code-architect` | opus | Design feature architectures and implementation blueprints |
 | `feature-dev:code-explorer` | sonnet | Deep codebase analysis, trace execution paths |
-| `feature-dev:code-reviewer` | sonnet | Review for bugs, security, quality, conventions |
-| `lsp-agents:lsp-explore` | inherit | Explore codebase using LSP and semantic search |
-| `lsp-agents:lsp-plan` | inherit | Design implementation plans using LSP exploration |
+| `feature-dev:code-reviewer` | opus | Review for bugs, security, quality, conventions |
 | `pr-review-toolkit:code-reviewer` | opus | Thorough PR review with priority ratings |
 | `pr-review-toolkit:code-simplifier` | opus | Simplify code while preserving functionality |
 | `pr-review-toolkit:comment-analyzer` | inherit | Analyze comments for accuracy and staleness |
 | `pr-review-toolkit:pr-test-analyzer` | inherit | Review test coverage and identify gaps |
-| `pr-review-toolkit:silent-failure-hunter` | inherit | Find silent failures and error handling gaps |
+| `pr-review-toolkit:silent-failure-hunter` | opus | Find silent failures and error handling gaps |
 | `pr-review-toolkit:type-design-analyzer` | inherit | Analyze type design quality and invariants |
+| `pr-review-toolkit:intent-reviewer` | opus | Validate code changes against intent documents |
 
-Sub-agents run in-process via `createAgentSession` with `SessionManager.inMemory()`. "inherit" agents use the parent's current model.
+Sub-agents run in-process via `createAgentSession`. Sessions persist to disk under `subagents/` when a parent session dir is available. "inherit" agents use the parent's current model.
 
 ## Code Intelligence Workflow
 
-The extension injects a tool selection hierarchy into the system prompt that guides the LLM to use LSP and semantic search before falling back to grep/find:
+The extension injects a tool selection hierarchy into the system prompt that guides the LLM to use LSP before falling back to grep/find:
 
 | Goal | Wrong first choice | Right first choice |
 |------|-------------------|-------------------|
-| Find code related to a concept | grep (keyword guessing) | `search_code` |
 | Find where a symbol is defined | grep (name search) | `lsp definition` |
 | Find where a symbol is used | grep (name search) | `lsp references` |
 | Find who calls a function | grep (name search) | `lsp incoming_calls` |
 | What does a function call? | read (manual) | `lsp outgoing_calls` |
 | Understand a file's structure | read (entire file) | `lsp document_symbols` |
-| Find project docs | grep (keyword search) | `search_docs` |
 
 ## Format-on-Write
 
@@ -108,10 +86,6 @@ Create `.pi/code-intel.json` in your project root (or `~/.pi/agent/code-intel.js
 {
   "lsp": {
     "enabled": true
-  },
-  "search": {
-    "enabled": true,
-    "command": "semvex-mcp"
   },
   "agents": {
     "enabled": true
@@ -167,13 +141,10 @@ src/
 ├── agents/
 │   ├── runner.ts         # Template loading, sub-agent execution via SDK
 │   ├── tool.ts           # Agent tool definition
-│   └── templates/        # 11 agent markdown templates
-├── search/
-│   ├── client.ts         # MCP JSON-RPC client
-│   ├── process.ts        # Semvex subprocess lifecycle
-│   └── tool.ts           # search_code + search_docs tools
+│   └── templates/        # Agent markdown templates
 └── prompt/
-    └── system-prompt.ts  # Code intelligence workflow prompt
+    ├── code-exploration.ts  # LSP-focused code exploration guidance
+    └── system-prompt.ts     # Code intelligence workflow prompt
 ```
 
 ## License

@@ -6,9 +6,8 @@ import {
 
 const DEFAULT_OPTS: SystemPromptOptions = {
 	hasLsp: false,
-	hasSearch: false,
 	hasAgent: false,
-	activeTools: ["read", "edit", "write", "bash", "grep", "find", "ls"],
+	activeTools: ["read", "edit", "write", "bash"],
 	toolSnippets: {},
 	piSystemPrompt: "",
 };
@@ -65,12 +64,13 @@ describe("buildSystemPrompt", () => {
 
 	it("includes bash routing when activeTools includes bash", () => {
 		const prompt = buildWith({});
-		expect(prompt).toContain("MUST NOT use bash for code exploration");
+		expect(prompt).toContain("automatically compressed");
+		expect(prompt).toContain("token efficiency");
 	});
 
 	it("does NOT include bash routing when bash not in activeTools", () => {
 		const prompt = buildWith({ activeTools: ["read", "edit"] });
-		expect(prompt).not.toContain("MUST NOT use bash for code exploration");
+		expect(prompt).not.toContain("automatically compressed");
 	});
 
 	it("includes code exploration when hasLsp=true", () => {
@@ -78,13 +78,8 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("Code exploration protocol");
 	});
 
-	it("includes code exploration when hasSearch=true", () => {
-		const prompt = buildWith({ hasSearch: true });
-		expect(prompt).toContain("Code exploration protocol");
-	});
-
-	it("does NOT include code exploration when both hasLsp=false and hasSearch=false", () => {
-		const prompt = buildWith({ hasLsp: false, hasSearch: false });
+	it("does NOT include code exploration when hasLsp=false", () => {
+		const prompt = buildWith({ hasLsp: false });
 		expect(prompt).not.toContain("Code exploration protocol");
 	});
 
@@ -107,7 +102,7 @@ describe("buildSystemPrompt", () => {
 	});
 
 	it("does NOT include editing section when tools lack read and edit", () => {
-		const prompt = buildWith({ activeTools: ["bash", "grep"] });
+		const prompt = buildWith({ activeTools: ["bash"] });
 		expect(prompt).not.toContain("## Editing");
 	});
 

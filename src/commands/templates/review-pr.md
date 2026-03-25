@@ -15,6 +15,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 1. **Determine Review Scope**
    - Check git status to identify changed files
    - Parse arguments to see if user requested specific review aspects
+   - When parsing, if `intent` is present, the token immediately following it is always its path argument (not a separate aspect name)
    - Default: Run all applicable reviews
 
 2. **Available Review Aspects:**
@@ -25,7 +26,8 @@ Run a comprehensive pull request review using multiple specialized agents, each 
    - **types** - Analyze type design and invariants (if new types added)
    - **code** - General code review for project guidelines
    - **simplify** - Simplify code for clarity and maintainability
-   - **all** - Run all applicable reviews (default)
+   - **intent** - Validate PR changes against an intent document (requires path argument)
+   - **all** - Run all applicable reviews (default; excludes intent unless path provided)
 
 3. **Identify Changed Files**
    - Run `git diff --name-only` to see modified files
@@ -40,6 +42,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
    - **If comments/docs added**: comment-analyzer
    - **If error handling changed**: silent-failure-hunter
    - **If types added/modified**: type-design-analyzer
+   - **If `intent <path>` provided**: intent-reviewer with the given path
    - **After passing review**: code-simplifier (polish and refine)
 
 5. **Launch Review Agents**
@@ -104,6 +107,12 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 
 /review-pr simplify
 # Simplifies code after passing review
+
+/review-pr intent .intent/add-api-caching-a1b2c3d4.md
+# Validates the PR diff against the given intent document
+
+/review-pr intent .intent/add-api-caching-a1b2c3d4.md code errors
+# Intent validation plus general code review and error handling
 ```
 
 **Parallel review:**
@@ -145,6 +154,13 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 - Applies project standards
 - Preserves functionality
 
+**intent-reviewer**:
+- Validates PR diff against intent document
+- Checks requirement completeness (FR/NFR coverage)
+- Flags architectural drift and out-of-scope violations
+- Identifies missing edge case handling
+- Requires intent document path as argument
+
 ## Tips:
 
 - **Run early**: Before creating PR, not after
@@ -152,6 +168,7 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 - **Address critical first**: Fix high-priority issues before lower priority
 - **Re-run after fixes**: Verify issues are resolved
 - **Use specific reviews**: Target specific aspects when you know the concern
+- **Intent review first**: When working from an intent doc, run `intent` before other reviews — alignment issues take priority
 
 ## Workflow Integration:
 
@@ -178,6 +195,16 @@ Run a comprehensive pull request review using multiple specialized agents, each 
 2. Run targeted reviews based on feedback
 3. Verify issues are resolved
 4. Push updates
+```
+
+**Full intent-first workflow:**
+```
+1. /feature-dev → produces .intent/<name>.md
+2. Implement the feature
+3. /review-pr intent .intent/<name>.md
+4. Address any spec gaps
+5. /review-pr all
+6. Create PR
 ```
 
 ## Notes:

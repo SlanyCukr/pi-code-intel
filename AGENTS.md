@@ -2,14 +2,14 @@
 
 ## Project Overview
 
-Pi extension package that adds LSP, sub-agents, semantic search, and code intelligence to the pi coding agent. Built as a standard pi package using TypeScript.
+Pi extension package that adds LSP support, sub-agents, and a code intelligence workflow to the pi coding agent. Built as a standard pi package using TypeScript.
 
 ## Build & Test
 
 ```bash
 npm run build      # Compile TypeScript + copy assets (defaults.json, templates)
 npm run typecheck   # Type check without emitting
-npm test           # Run vitest tests (61 tests)
+npm test           # Run vitest tests
 npm run dev        # Watch mode for TypeScript compilation
 ```
 
@@ -31,7 +31,8 @@ name: template-name
 category: category-name
 description: One-line description
 model: sonnet | opus | inherit
-tools: [read, grep, find, ls, lsp, search_code]
+thinkingLevel: off | minimal | low | medium | high | xhigh
+tools: [read, bash, lsp]
 ---
 # System prompt content here
 ```
@@ -40,18 +41,31 @@ tools: [read, grep, find, ls, lsp, search_code]
 `src/lsp/client.ts` uses binary `Buffer` for message framing (Content-Length headers are byte counts). Never use string length for LSP message slicing.
 
 ### Sub-agents
-Created via `createAgentSession()` with `SessionManager.inMemory()`. Call `session.agent.setSystemPrompt()` to set the prompt, `session.prompt(task)` to run, `session.dispose()` to clean up.
+Created via `createAgentSession()` in `src/agents/runner.ts`. Sessions persist to disk under `<parent-session-dir>/subagents/` when a parent session dir is available, otherwise fall back to `SessionManager.inMemory()`. Call `session.agent.setSystemPrompt()` to set the prompt, `session.prompt(task)` to run, `session.dispose()` to clean up. Subagent JSONL files use the same format as main sessions — see `node_modules/@mariozechner/pi-coding-agent/docs/session.md` for the full spec.
+
+### Session Format
+Pi sessions are JSONL files at `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<uuid>.jsonl`. Each line is a JSON object with a `type` field. Key entry types:
+- `session` — header with version, uuid, cwd
+- `message` — contains `AgentMessage` with role `user`, `assistant`, or `toolResult`
+- `model_change`, `thinking_level_change` — mid-session switches
+- `compaction` — context compaction summaries
+
+Assistant messages contain `toolCall` content blocks: `{ type: "toolCall", name: string, arguments: Record<string, any> }`. Tool results are separate `toolResult` messages with `toolName`, `content`, `isError`.
+
+Use `/read-session <path>` to parse and summarize a session file (runs `scripts/parse-session.py`).
 
 ## Module Dependencies
 
 ```
-extension.ts → config.ts, lsp/*, agents/*, search/*, prompt/*
-agents/tool.ts → agents/runner.ts → @mariozechner/pi-coding-agent SDK
+extension.ts → config.ts, lsp/*, agents/*, commands/*, prompt/*, rtk.ts
+agents/tool.ts → agents/runner.ts, agents/templates.ts
+agents/runner.ts → agents/templates.ts, prompt/code-exploration.ts, prompt/subagent-prompt.ts, rtk.ts
+agents/templates.ts → utils/frontmatter.ts, utils/templates.ts
+commands/registry.ts → agents/templates.ts, utils/frontmatter.ts, utils/templates.ts
 lsp/tool.ts → lsp/client.ts → lsp/config.ts, lsp/utils.ts, lsp/types.ts
-search/tool.ts → search/process.ts → search/client.ts
 ```
 
-No circular dependencies. `lsp/`, `agents/`, `search/`, and `prompt/` are independent modules — only `extension.ts` wires them together.
+No circular dependencies. `lsp/`, `prompt/`, and `utils/` are independent leaf modules. `agents/templates.ts` is the template registry (parse, load, query). `agents/runner.ts` handles sub-agent execution. `commands/` depends on `agents/templates.ts` (for template grouping). `extension.ts` is the hub that wires everything together.
 
 ## Conventions
 
@@ -60,3 +74,5 @@ No circular dependencies. `lsp/`, `agents/`, `search/`, and `prompt/` are indepe
 - Use `Model<any>` (not `Model<unknown>`) for pi SDK model types
 - Assets (defaults.json, templates) copied to `dist/` by `scripts/copy-assets.ts`
 - Config files at `.pi/code-intel.json` (project) and `.pi/lsp.json` (LSP overrides)
+- All bash commands routed through RTK for token-optimized output — no dedicated grep/find/ls tools
+- Dependency: `@mariozechner/pi-coding-agent ^0.62.0`

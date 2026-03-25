@@ -26,7 +26,6 @@ import {
 	formatLocations,
 	formatWorkspaceSymbols,
 	resolveSymbolPosition,
-	uriToFile,
 } from "./utils.js";
 
 const lspSchema = Type.Object(
@@ -142,15 +141,16 @@ async function executeLspAction(
 	}
 
 	if (action === "reload") {
-		await manager.shutdown();
-		return "All LSP servers have been shut down. They will restart on next use.";
+		await manager.restart();
+		return "All LSP servers have been restarted. Cached state has been cleared.";
 	}
 
 	if (action === "workspace_symbols") {
-		if (!input.query) return "Error: query is required for workspace_symbols";
+		if (!input.query) throw new Error("query is required for workspace_symbols");
 		if (!input.file)
-			return "Error: file is required for workspace_symbols (to determine which LSP server to use)";
-		const client = await manager.getClientForFile(input.file, signal);
+			throw new Error("file is required for workspace_symbols (to determine which LSP server to use)");
+		const absFile = resolve(cwd, input.file);
+		const client = await manager.getClientForFile(absFile, signal);
 		if (!client) return `No LSP server available for ${input.file}`;
 
 		const symbols = (await manager.sendRequest(
@@ -164,10 +164,10 @@ async function executeLspAction(
 	}
 
 	// All other actions need a file
-	if (!input.file) return `Error: file is required for ${action}`;
+	if (!input.file) throw new Error(`file is required for ${action}`);
 	const filePath = resolve(cwd, input.file);
 
-	const client = await manager.getClientForFile(input.file, signal);
+	const client = await manager.getClientForFile(filePath, signal);
 	if (!client) return `No LSP server available for ${input.file}`;
 
 	// Sync the file before making requests
@@ -175,10 +175,12 @@ async function executeLspAction(
 
 	const uri = fileToUri(filePath);
 
+	const DIAGNOSTICS_SETTLE_MS = 500;
+
 	switch (action) {
 		case "diagnostics": {
 			// Wait briefly for diagnostics to arrive after sync
-			await new Promise((r) => setTimeout(r, 500));
+			await new Promise((r) => setTimeout(r, DIAGNOSTICS_SETTLE_MS));
 			const diags = manager.getDiagnostics(client, filePath);
 			return formatDiagnostics(diags, cwd);
 		}
@@ -195,7 +197,7 @@ async function executeLspAction(
 		}
 
 		case "hover": {
-			if (!input.line) return "Error: line is required for hover";
+			if (!input.line) throw new Error("line is required for hover");
 			const pos = resolveSymbolPosition(
 				filePath,
 				input.line,
@@ -214,7 +216,7 @@ async function executeLspAction(
 		case "definition":
 		case "type_definition":
 		case "implementation": {
-			if (!input.line) return `Error: line is required for ${action}`;
+			if (!input.line) throw new Error(`line is required for ${action}`);
 			const pos = resolveSymbolPosition(
 				filePath,
 				input.line,
@@ -248,7 +250,7 @@ async function executeLspAction(
 		}
 
 		case "references": {
-			if (!input.line) return "Error: line is required for references";
+			if (!input.line) throw new Error("line is required for references");
 			const pos = resolveSymbolPosition(
 				filePath,
 				input.line,
@@ -271,7 +273,7 @@ async function executeLspAction(
 
 		case "incoming_calls":
 		case "outgoing_calls": {
-			if (!input.line) return `Error: line is required for ${action}`;
+			if (!input.line) throw new Error(`line is required for ${action}`);
 			const pos = resolveSymbolPosition(
 				filePath,
 				input.line,
@@ -291,30 +293,27 @@ async function executeLspAction(
 
 			const item = items[0];
 
+			const callMethodMap: Record<string, string> = {
+				incoming_calls: "callHierarchy/incomingCalls",
+				outgoing_calls: "callHierarchy/outgoingCalls",
+			};
+			const calls = (await manager.sendRequest(
+				client,
+				callMethodMap[action],
+				{ item },
+				signal,
+			)) as (CallHierarchyIncomingCall | CallHierarchyOutgoingCall)[] | null;
+
 			if (action === "incoming_calls") {
-				const calls = (await manager.sendRequest(
-					client,
-					"callHierarchy/incomingCalls",
-					{ item },
-					signal,
-				)) as CallHierarchyIncomingCall[] | null;
-
-				return `Incoming calls to ${item.name}:\n${formatCallHierarchyIncoming(calls ?? [], cwd)}`;
+				return `Incoming calls to ${item.name}:\n${formatCallHierarchyIncoming((calls ?? []) as CallHierarchyIncomingCall[], cwd)}`;
 			} else {
-				const calls = (await manager.sendRequest(
-					client,
-					"callHierarchy/outgoingCalls",
-					{ item },
-					signal,
-				)) as CallHierarchyOutgoingCall[] | null;
-
-				return `Outgoing calls from ${item.name}:\n${formatCallHierarchyOutgoing(calls ?? [], cwd)}`;
+				return `Outgoing calls from ${item.name}:\n${formatCallHierarchyOutgoing((calls ?? []) as CallHierarchyOutgoingCall[], cwd)}`;
 			}
 		}
 
 		case "rename": {
-			if (!input.line) return "Error: line is required for rename";
-			if (!input.new_name) return "Error: new_name is required for rename";
+			if (!input.line) throw new Error("line is required for rename");
+			if (!input.new_name) throw new Error("new_name is required for rename");
 			const pos = resolveSymbolPosition(
 				filePath,
 				input.line,
@@ -346,7 +345,7 @@ async function executeLspAction(
 		}
 
 		case "code_actions": {
-			if (!input.line) return "Error: line is required for code_actions";
+			if (!input.line) throw new Error("line is required for code_actions");
 			const pos = resolveSymbolPosition(
 				filePath,
 				input.line,

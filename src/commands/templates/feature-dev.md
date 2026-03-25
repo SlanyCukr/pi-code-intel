@@ -81,34 +81,118 @@ If the user says "whatever you think is best", provide your recommendation and g
 
 ---
 
-## Phase 5: Implementation
+## Phase 5: Intent Documentation
+
+**Goal**: Capture the full specification as a formal, reviewable document before any code is written
+
+**CRITICAL**: Do not proceed to implementation without completing this phase and receiving user approval on the intent document.
+
+**Actions**:
+1. Compile the inputs for the intent document — synthesize from the previous phases:
+   - Feature description from Phase 1
+   - Clarification answers from Phase 3
+   - Chosen architecture from Phase 4 (the user-approved approach)
+2. Derive a filename slug from the feature description (lowercase, hyphens, 3-5 words) and generate a short UUID suffix (8 hex chars via `uuidgen | tr -d '-' | head -c8`). Example: `add-api-caching-a1b2c3d4.md`
+3. Create `.intent/` directory if it doesn't exist (`mkdir -p .intent`)
+4. Write `.intent/<slug>-<uuid>.md` using the intent document format below
+5. Present the intent document to the user with a brief summary
+6. **Wait for explicit user approval before proceeding**
+   - If they request changes, update the document and re-present
+   - If they approve, note the file path — it will be referenced during implementation and review
+
+The intent document is the source of truth. If implementation decisions diverge from it, update the intent doc first.
+
+**Intent Document Format**:
+
+```markdown
+# Intent: <Feature Title>
+
+**Created**: <ISO date>
+**ID**: <slug>-<uuid>
+
+---
+
+## Problem Statement
+<One to three sentences. What problem does this solve and why it matters.>
+
+## Scope
+
+**In scope:**
+- <Concrete item>
+
+**Out of scope:**
+- <Explicit exclusion to prevent scope creep>
+
+## Requirements
+
+### Functional Requirements
+- FR-1: <Specific, testable requirement>
+- FR-2: <Specific, testable requirement>
+
+### Non-Functional Requirements
+- NFR-1: <Performance, reliability, security, or UX requirement>
+
+## Architectural Decisions
+
+### Decision: <Short name>
+**Chosen approach**: <What was decided>
+**Rationale**: <Why this over alternatives>
+**Trade-offs accepted**: <What we're giving up>
+
+## Implementation Plan
+
+### Files to Create
+| File | Purpose |
+|------|---------|
+| `path/to/file` | <What it does> |
+
+### Files to Modify
+| File | Change |
+|------|--------|
+| `path/to/file` | <What changes and why> |
+
+## Edge Cases and Error Handling
+- **<Scenario>**: <Expected behavior>
+
+## Constraints
+- <Technical or scope constraint from clarification phase>
+```
+
+**Note**: The intent document path should be referenced in Phase 8 summary for future `/review-pr intent <path>` use. The `.intent/` directory and its files are ephemeral — clean them up after the PR is merged.
+
+---
+
+## Phase 6: Implementation
 
 **Goal**: Build the feature
 
-**DO NOT START WITHOUT USER APPROVAL**
+**DO NOT START WITHOUT USER APPROVAL ON THE INTENT DOCUMENT FROM PHASE 5**
 
 **Actions**:
 1. Wait for explicit user approval
 2. Read all relevant files identified in previous phases
-3. Implement following chosen architecture
+3. Implement following the chosen architecture and the approved intent document
 4. Follow codebase conventions strictly
 5. Write clean, well-documented code
+6. If you need to deviate from the intent document, pause and note the deviation explicitly before proceeding
 
 ---
 
-## Phase 6: Quality Review
+## Phase 7: Quality Review
 
-**Goal**: Ensure code is simple, DRY, elegant, easy to read, and functionally correct
+**Goal**: Ensure code is simple, DRY, elegant, easy to read, functionally correct, and faithful to the intent document
 
 **Actions**:
-1. Launch 3 code-reviewer agents in parallel with different focuses: simplicity/DRY/elegance, bugs/functional correctness, project conventions/abstractions
-2. Consolidate findings and identify highest severity issues that you recommend fixing
+1. Launch review agents in parallel:
+   - 3 code-reviewer agents with different focuses: simplicity/DRY/elegance, bugs/functional correctness, project conventions/abstractions
+   - 1 `pr-review-toolkit:intent-reviewer` agent with the intent document path from Phase 5 — validates completeness, drift, fidelity, and out-of-scope violations
+2. Consolidate findings from all agents and identify highest severity issues that you recommend fixing
 3. **Present findings to user and ask what they want to do** (fix now, fix later, or proceed as-is)
 4. Address issues based on user decision
 
 ---
 
-## Phase 7: Summary
+## Phase 8: Summary
 
 **Goal**: Document what was accomplished
 
@@ -117,6 +201,7 @@ If the user says "whatever you think is best", provide your recommendation and g
    - What was built
    - Key decisions made
    - Files modified
+   - The intent document path (`.intent/<slug>-<uuid>.md`) for future `/review-pr intent` use
    - Suggested next steps
 
 ---

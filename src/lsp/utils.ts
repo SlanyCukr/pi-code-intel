@@ -116,37 +116,36 @@ export function formatLocation(loc: Location, cwd: string): string {
 	return `${file}:${line}:${col}`;
 }
 
+function formatSingleLocation(loc: Location | LocationLink, cwd: string): string {
+	if ("targetUri" in loc) {
+		const file = relative(cwd, uriToFile(loc.targetUri));
+		const line = loc.targetSelectionRange.start.line + 1;
+		const col = loc.targetSelectionRange.start.character + 1;
+		return `${file}:${line}:${col}`;
+	}
+	return formatLocation(loc, cwd);
+}
+
 export function formatLocations(
 	locations: (Location | LocationLink)[],
 	cwd: string,
 ): string {
 	if (locations.length === 0) return "No results found.";
 
-	const formatted = locations.map((loc) => {
-		if ("targetUri" in loc) {
-			// LocationLink
-			const file = relative(cwd, uriToFile(loc.targetUri));
-			const line = loc.targetSelectionRange.start.line + 1;
-			const col = loc.targetSelectionRange.start.character + 1;
-			return `  ${file}:${line}:${col}`;
-		}
-		return `  ${formatLocation(loc, cwd)}`;
-	});
-
-	// Group by file
-	const grouped = new Map<string, string[]>();
-	for (const line of formatted) {
-		const file = line.trim().split(":")[0];
+	// Group raw locations by relative file path first, then format each group.
+	const grouped = new Map<string, (Location | LocationLink)[]>();
+	for (const loc of locations) {
+		const file = relative(cwd, uriToFile("targetUri" in loc ? loc.targetUri : loc.uri));
 		if (!grouped.has(file)) grouped.set(file, []);
-		grouped.get(file)!.push(line);
-	}
-
-	if (grouped.size === 1) {
-		return `Found ${locations.length} result(s):\n${formatted.join("\n")}`;
+		grouped.get(file)!.push(loc);
 	}
 
 	const parts: string[] = [];
-	for (const [file, lines] of grouped) {
+	for (const [file, locs] of grouped) {
+		const lines = locs.map((loc) => `  ${formatSingleLocation(loc, cwd)}`);
+		if (grouped.size === 1) {
+			return `Found ${locations.length} result(s):\n${lines.join("\n")}`;
+		}
 		parts.push(`${file}:\n${lines.join("\n")}`);
 	}
 	return `Found ${locations.length} result(s) in ${grouped.size} files:\n${parts.join("\n")}`;

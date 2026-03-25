@@ -1,14 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
-export interface CodeIntelConfig {
+interface CodeIntelConfig {
 	lsp: {
 		enabled: boolean;
-	};
-	search: {
-		enabled: boolean;
-		command: string;
-		args?: string[];
 	};
 	agents: {
 		enabled: boolean;
@@ -20,7 +16,6 @@ export interface CodeIntelConfig {
 
 const DEFAULT_CONFIG: CodeIntelConfig = {
 	lsp: { enabled: true },
-	search: { enabled: true, command: "semvex-mcp" },
 	agents: { enabled: true },
 	prompt: { enabled: true },
 };
@@ -33,7 +28,7 @@ export function loadCodeIntelConfig(cwd: string): CodeIntelConfig {
 	const config = structuredClone(DEFAULT_CONFIG);
 
 	// User-level config
-	const home = process.env.HOME ?? process.env.USERPROFILE ?? "~";
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? homedir();
 	mergeConfigFile(config, join(home, ".pi", "agent", "code-intel.json"));
 
 	// Project-level config
@@ -50,9 +45,6 @@ function mergeConfigFile(config: CodeIntelConfig, path: string): void {
 			if (raw.lsp && typeof raw.lsp === "object") {
 				Object.assign(config.lsp, raw.lsp);
 			}
-			if (raw.search && typeof raw.search === "object") {
-				Object.assign(config.search, raw.search);
-			}
 			if (raw.agents && typeof raw.agents === "object") {
 				Object.assign(config.agents, raw.agents);
 			}
@@ -61,6 +53,7 @@ function mergeConfigFile(config: CodeIntelConfig, path: string): void {
 			}
 		}
 	} catch (err) {
+		// Intentional fallback: bad config file is non-fatal; defaults remain in effect
 		console.error(`[code-intel] Failed to load config from ${path}:`, err instanceof Error ? err.message : err);
 	}
 }

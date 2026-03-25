@@ -1,20 +1,54 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, join, extname } from "node:path";
+import { join, extname } from "node:path";
 import {
 	type LspConfiguration,
 	detectProjectServers,
 	getServersForFile,
 	resolveCommand,
 } from "./config.js";
-import type {
-	JsonRpcNotification,
-	JsonRpcRequest,
-	JsonRpcResponse,
-	LspClient,
-	ServerConfig,
-} from "./types.js";
+import type { Diagnostic, ServerConfig } from "./types.js";
 import { fileToUri, getLanguageId } from "./utils.js";
+
+interface LspClient {
+	serverName: string;
+	config: ServerConfig;
+	process: ChildProcess;
+	serverCapabilities: Record<string, unknown>;
+	openFiles: Map<string, { version: number; content: string }>;
+	pendingRequests: Map<
+		number,
+		{
+			resolve: (value: unknown) => void;
+			reject: (error: Error) => void;
+			timer?: ReturnType<typeof setTimeout>;
+		}
+	>;
+	diagnostics: Map<string, Diagnostic[]>;
+	lastUsed: number;
+	nextId: number;
+	buffer: Buffer;
+}
+
+interface JsonRpcRequest {
+	jsonrpc: "2.0";
+	id: number;
+	method: string;
+	params?: unknown;
+}
+
+interface JsonRpcResponse {
+	jsonrpc: "2.0";
+	id: number;
+	result?: unknown;
+	error?: { code: number; message: string; data?: unknown };
+}
+
+interface JsonRpcNotification {
+	jsonrpc: "2.0";
+	method: string;
+	params?: unknown;
+}
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -26,7 +60,7 @@ const SKIP_DIRS = new Set([
 	".nuxt", "coverage", ".cache",
 ]);
 
-function collectSourceFiles(
+export function collectSourceFiles(
 	root: string,
 	extensions: Set<string>,
 	maxFiles = MAX_WARMUP_FILES,
@@ -190,7 +224,7 @@ export class LspClientManager {
 		const promises = detected.map(async (name) => {
 			const serverConfig = this.config.servers[name];
 			if (!serverConfig || serverConfig.isLinter) return;
-			let timer: ReturnType<typeof setTimeout>;
+			let timer: ReturnType<typeof setTimeout> | undefined = undefined;
 			try {
 				const client = await Promise.race([
 					this.getOrCreate(name, serverConfig),
@@ -198,7 +232,7 @@ export class LspClientManager {
 						timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
 					}),
 				]);
-				clearTimeout(timer!);
+				if (timer !== undefined) clearTimeout(timer);
 				// Open project source files so the server indexes them
 				const exts = new Set(serverConfig.fileTypes);
 				const files = collectSourceFiles(this.cwd, exts);
@@ -207,7 +241,7 @@ export class LspClientManager {
 				}
 				console.error(`[lsp] warmup: started ${name} (indexed ${files.length} files)`);
 			} catch (err) {
-				clearTimeout(timer!);
+				if (timer !== undefined) clearTimeout(timer);
 				console.error(`[lsp] warmup failed for ${name}:`, err instanceof Error ? err.message : err);
 			}
 		});
@@ -217,13 +251,13 @@ export class LspClientManager {
 	/**
 	 * Get or create an LSP client for a file.
 	 * Returns the first non-linter server that handles the file's extension.
+	 * filePath must be an absolute path.
 	 */
 	async getClientForFile(
 		filePath: string,
 		signal?: AbortSignal,
 	): Promise<LspClient | null> {
-		const absPath = resolve(this.cwd, filePath);
-		const servers = getServersForFile(this.config, absPath);
+		const servers = getServersForFile(this.config, filePath);
 		if (servers.length === 0) return null;
 
 		// Use first non-linter server
@@ -390,7 +424,8 @@ export class LspClientManager {
 			}
 
 			const body = client.buffer.subarray(bodyStart, bodyEnd).toString("utf-8");
-			client.buffer = Buffer.from(client.buffer.subarray(bodyEnd));
+			// subarray returns a view — no copy needed
+			client.buffer = client.buffer.subarray(bodyEnd);
 
 			let message: JsonRpcResponse | JsonRpcNotification | JsonRpcRequest;
 			try {
@@ -450,7 +485,7 @@ export class LspClientManager {
 			if (params?.uri && Array.isArray(params.diagnostics)) {
 				client.diagnostics.set(
 					params.uri,
-					params.diagnostics as import("./types.js").Diagnostic[],
+					params.diagnostics as Diagnostic[],
 				);
 			}
 		}
@@ -542,11 +577,11 @@ export class LspClientManager {
 			signal?.addEventListener("abort", abortHandler, { once: true });
 
 			client.pendingRequests.set(id, {
-				resolve: (value) => {
+				resolve: (value: unknown) => {
 					signal?.removeEventListener("abort", abortHandler);
 					resolve(value);
 				},
-				reject: (error) => {
+				reject: (error: Error) => {
 					signal?.removeEventListener("abort", abortHandler);
 					reject(error);
 				},
@@ -608,20 +643,20 @@ export class LspClientManager {
 	}
 
 	/**
-	 * Ensure a file is opened in the LSP server (sends didOpen or didChange).
+	 * Attempt to open or update a file in the LSP server (sends didOpen or didChange). Silently skips if the file cannot be read.
+	 * filePath must be an absolute path.
 	 */
 	async syncFile(client: LspClient, filePath: string): Promise<void> {
-		const absPath = resolve(this.cwd, filePath);
-		const uri = fileToUri(absPath);
-		const languageId = getLanguageId(absPath) ?? "plaintext";
+		const uri = fileToUri(filePath);
+		const languageId = getLanguageId(filePath) ?? "plaintext";
 
 		let content: string;
 		try {
-			content = readFileSync(absPath, "utf-8");
+			content = readFileSync(filePath, "utf-8");
 		} catch (err) {
 			const code = (err as NodeJS.ErrnoException).code;
 			if (code !== 'ENOENT') {
-				console.error(`[lsp:${client.serverName}] Failed to read ${absPath}:`, err instanceof Error ? err.message : err);
+				console.error(`[lsp:${client.serverName}] Failed to read ${filePath}:`, err instanceof Error ? err.message : err);
 			}
 			return;
 		}
@@ -652,11 +687,12 @@ export class LspClientManager {
 	}
 
 	/**
-	 * Get diagnostics for a file from a client's cache.
+	 * Get diagnostics from a client's cache. Returns diagnostics for a specific file, or all cached diagnostics if filePath is omitted.
+	 * filePath must be an absolute path when provided.
 	 */
-	getDiagnostics(client: LspClient, filePath?: string): Map<string, import("./types.js").Diagnostic[]> {
+	getDiagnostics(client: LspClient, filePath?: string): Map<string, Diagnostic[]> {
 		if (filePath) {
-			const uri = fileToUri(resolve(this.cwd, filePath));
+			const uri = fileToUri(filePath);
 			const diags = client.diagnostics.get(uri);
 			if (diags) {
 				return new Map([[uri, diags]]);
@@ -703,13 +739,13 @@ export class LspClientManager {
 	}
 
 	/**
-	 * Release one reference. Only shuts down LSP servers when the last
-	 * reference is released (parent session), so sub-agents don't kill
-	 * shared servers.
+	 * Decrement the reference count. Shuts down all LSP servers and removes
+	 * this manager from the singleton cache only when the last reference is
+	 * released, so sub-agents do not kill servers still in use by the parent.
 	 */
-	async shutdown(): Promise<void> {
+	async release(): Promise<void> {
 		if (this.refCount <= 0) {
-			console.error(`[lsp] shutdown called with refCount=${this.refCount} (already shut down?)`);
+			console.error(`[lsp] release called with refCount=${this.refCount} (already released?)`);
 			return;
 		}
 		this.refCount--;
@@ -727,5 +763,21 @@ export class LspClientManager {
 			([name, client]) => this.shutdownClient(name, client),
 		);
 		await Promise.allSettled(shutdowns);
+	}
+
+	/**
+	 * Kill all active LSP server processes and clear cached state, but keep
+	 * this manager registered in the singleton cache with its current refCount.
+	 * Servers will be re-created on the next tool call.
+	 */
+	async restart(): Promise<void> {
+		const kills = Array.from(this.clients.entries()).map(
+			([name, client]) => this.shutdownClient(name, client),
+		);
+		await Promise.allSettled(kills);
+		// shutdownClient already calls this.clients.delete(name) for each entry,
+		// but clear both maps explicitly to reset all state.
+		this.clients.clear();
+		this.warmedUp = false;
 	}
 }

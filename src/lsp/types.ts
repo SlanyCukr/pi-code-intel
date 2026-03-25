@@ -1,5 +1,3 @@
-import type { ChildProcess } from "node:child_process";
-
 // LSP Protocol Types
 
 export interface Position {
@@ -100,7 +98,7 @@ export interface MarkupContent {
 	value: string;
 }
 
-export interface TextEdit {
+interface TextEdit {
 	range: Range;
 	newText: string;
 }
@@ -110,23 +108,23 @@ export interface WorkspaceEdit {
 	documentChanges?: (TextDocumentEdit | CreateFile | RenameFile | DeleteFile)[];
 }
 
-export interface TextDocumentEdit {
+interface TextDocumentEdit {
 	textDocument: { uri: string; version: number | null };
 	edits: TextEdit[];
 }
 
-export interface CreateFile {
+interface CreateFile {
 	kind: "create";
 	uri: string;
 }
 
-export interface RenameFile {
+interface RenameFile {
 	kind: "rename";
 	oldUri: string;
 	newUri: string;
 }
 
-export interface DeleteFile {
+interface DeleteFile {
 	kind: "delete";
 	uri: string;
 }
@@ -140,7 +138,7 @@ export interface CodeAction {
 	isPreferred?: boolean;
 }
 
-export interface Command {
+interface Command {
 	title: string;
 	command: string;
 	arguments?: unknown[];
@@ -176,49 +174,5 @@ export interface ServerConfig {
 	initOptions?: Record<string, unknown>;
 	isLinter?: boolean;
 	env?: Record<string, string>;
-}
-
-// Live Client State
-
-export interface LspClient {
-	serverName: string;
-	config: ServerConfig;
-	process: ChildProcess;
-	serverCapabilities: Record<string, unknown>;
-	openFiles: Map<string, { version: number; content: string }>;
-	pendingRequests: Map<
-		number,
-		{
-			resolve: (value: unknown) => void;
-			reject: (error: Error) => void;
-			timer?: ReturnType<typeof setTimeout>;
-		}
-	>;
-	diagnostics: Map<string, Diagnostic[]>;
-	lastUsed: number;
-	nextId: number;
-	buffer: Buffer;
-}
-
-// JSON-RPC 2.0
-
-export interface JsonRpcRequest {
-	jsonrpc: "2.0";
-	id: number;
-	method: string;
-	params?: unknown;
-}
-
-export interface JsonRpcResponse {
-	jsonrpc: "2.0";
-	id: number;
-	result?: unknown;
-	error?: { code: number; message: string; data?: unknown };
-}
-
-export interface JsonRpcNotification {
-	jsonrpc: "2.0";
-	method: string;
-	params?: unknown;
 }
 

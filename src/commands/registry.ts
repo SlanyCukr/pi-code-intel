@@ -1,8 +1,9 @@
-import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { listTemplates } from "../agents/runner.js";
+import { groupTemplatesByCategory } from "../agents/templates.js";
+import { getString, parseFrontmatter } from "../utils/frontmatter.js";
+import { loadMarkdownDir } from "../utils/templates.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -17,25 +18,20 @@ interface CommandTemplate {
  * Parse a command template markdown file with YAML-like frontmatter.
  */
 function parseCommandTemplate(content: string): CommandTemplate | null {
-	const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-	if (!fmMatch) return null;
+	const parsed = parseFrontmatter(content);
+	if (!parsed) return null;
 
-	const frontmatter = fmMatch[1];
-	const prompt = fmMatch[2].trim();
+	const { frontmatter, body } = parsed;
+	const prompt = body.trim();
 
-	const getString = (key: string): string | undefined => {
-		const match = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-		return match ? match[1].trim().replace(/^["']|["']$/g, "") : undefined;
-	};
-
-	const name = getString("name");
-	const description = getString("description");
+	const name = getString(frontmatter, "name");
+	const description = getString(frontmatter, "description");
 	if (!name || !description) return null;
 
 	return {
 		name,
 		description,
-		argumentHint: getString("argument-hint"),
+		argumentHint: getString(frontmatter, "argument-hint"),
 		prompt,
 	};
 }
@@ -44,31 +40,18 @@ function parseCommandTemplate(content: string): CommandTemplate | null {
  * Load all command templates from the templates directory.
  */
 function loadCommandTemplates(): CommandTemplate[] {
-	const templatesDir = join(__dirname, "templates");
-	const templates: CommandTemplate[] = [];
-
-	try {
-		const files = readdirSync(templatesDir);
-		for (const file of files) {
-			if (!file.endsWith(".md")) continue;
-			const content = readFileSync(join(templatesDir, file), "utf-8");
+	return loadMarkdownDir<CommandTemplate>(
+		join(__dirname, "templates"),
+		(content, file) => {
 			const template = parseCommandTemplate(content);
-			if (template) {
-				templates.push(template);
-			} else {
+			if (!template) {
 				console.error(
 					`[code-intel] Failed to parse command template: ${file} (check frontmatter format)`,
 				);
 			}
-		}
-	} catch (err) {
-		console.error(
-			"[code-intel] Failed to load command templates:",
-			err instanceof Error ? err.message : err,
-		);
-	}
-
-	return templates;
+			return template;
+		},
+	);
 }
 
 /**
@@ -122,23 +105,16 @@ function registerAgentsCommand(pi: any): void {
 	pi.registerCommand("agents", {
 		description: "List available sub-agents",
 		handler: async (_args: string, ctx: any) => {
-			const agents = listTemplates();
-			if (agents.length === 0) {
+			const byCategory = groupTemplatesByCategory();
+			if (byCategory.size === 0) {
 				ctx.ui.notify("No sub-agents available", "info");
 				return;
 			}
 
 			const lines: string[] = [];
-			const byCategory = new Map<string, typeof agents>();
-			for (const agent of agents) {
-				const list = byCategory.get(agent.category) ?? [];
-				list.push(agent);
-				byCategory.set(agent.category, list);
-			}
-
-			for (const [category, categoryAgents] of byCategory) {
+			for (const [category, agents] of byCategory) {
 				lines.push(`\n${category}:`);
-				for (const agent of categoryAgents) {
+				for (const agent of agents) {
 					const model =
 						agent.model === "inherit" ? "inherits parent" : agent.model;
 					lines.push(

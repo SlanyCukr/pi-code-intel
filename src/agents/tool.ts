@@ -6,12 +6,12 @@ import type {
 	CreateAgentSessionOptions,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+import { runSubAgent } from "./runner.js";
 import {
-	type AgentTemplate,
 	getTemplate,
+	groupTemplatesByCategory,
 	listTemplates,
-	runSubAgent,
-} from "./runner.js";
+} from "./templates.js";
 
 const agentSchema = Type.Object(
 	{
@@ -30,20 +30,11 @@ const agentSchema = Type.Object(
 type AgentInput = Static<typeof agentSchema>;
 
 function buildDescription(): string {
-	const templates = listTemplates();
-
-	const byCategory = new Map<string, AgentTemplate[]>();
-	for (const t of templates) {
-		const existing = byCategory.get(t.category) ?? [];
-		existing.push(t);
-		byCategory.set(t.category, existing);
-	}
-
 	let desc =
 		"Delegate a task to a specialized sub-agent. The sub-agent runs to completion and returns its output.\n\n";
 	desc += "Available agent types:\n";
 
-	for (const [category, agents] of byCategory) {
+	for (const [category, agents] of groupTemplatesByCategory()) {
 		desc += `\n${category}:\n`;
 		for (const agent of agents) {
 			const model =
@@ -101,15 +92,19 @@ export function createAgentTool(
 					}
 				: undefined;
 
-			const result = await runSubAgent(
+			// Resolve subagent session dir from parent context for disk persistence
+			const sessionDir = ctx.sessionManager.getSessionDir();
+
+			const result = await runSubAgent({
 				template,
-				input.task,
-				ctx.cwd,
-				ctx.model,
+				task: input.task,
+				cwd: ctx.cwd,
+				parentModel: ctx.model,
 				customTools,
 				signal,
 				onProgress,
-			);
+				parentSessionDir: sessionDir,
+			});
 
 			if (result.error) {
 				throw new Error(
