@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { aggregateMetrics, extractMetrics } from "./metrics.js";
+import { correlateOutcomes, type OutcomeData } from "./outcomes.js";
 import { runAllRules } from "./patterns/index.js";
 import { readSession } from "./reader.js";
 import { renderMarkdown } from "./report.js";
@@ -83,6 +84,15 @@ export function runAnalysis(args: AnalysisArgs): AnalysisResult {
 		hitsBySession.set(session.header.id, runAllRules(session));
 	}
 
+	// Outcome correlation runs per session. Each invocation may shell
+	// out to git twice (commits-in-window + revert-search) against the
+	// session's cwd. For a one-off tool with N ≤ ~50 sessions this is
+	// fast enough; if it ever becomes hot we can hoist the revert search.
+	const outcomesBySession = new Map<string, OutcomeData>();
+	for (const session of parsed) {
+		outcomesBySession.set(session.header.id, correlateOutcomes(session));
+	}
+
 	const aggregated = aggregateMetrics(
 		perSession,
 		parsed.map((p) => p.events),
@@ -93,6 +103,7 @@ export function runAnalysis(args: AnalysisArgs): AnalysisResult {
 		sessionMetrics: perSession,
 		aggregated,
 		hitsBySession,
+		outcomesBySession,
 	});
 
 	let outPath: string | null = null;

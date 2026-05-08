@@ -2,12 +2,14 @@ import type {
 	AggregatedMetrics,
 	SessionMetrics,
 } from "./metrics.js";
+import type { OutcomeData } from "./outcomes.js";
 import type { AntiPatternHit } from "./types.js";
 
 /**
  * Inputs to the markdown renderer. Sections that aren't ready for this
- * phase (outcomes, proposals) are passed as `undefined` and rendered as
- * "(not requested)" or "(no findings)" depending on the section.
+ * phase (proposals) are passed as `undefined` and rendered as a
+ * placeholder; sections that *were* requested but yielded nothing
+ * render `(no findings)` so empty-vs-skipped stays distinguishable.
  */
 export interface RenderInput {
 	generatedAt: Date;
@@ -15,8 +17,8 @@ export interface RenderInput {
 	aggregated: AggregatedMetrics;
 	/** Map session id → hits found in that session. */
 	hitsBySession: Map<string, AntiPatternHit[]>;
-	/** Section 4 — phase 5 will populate this. */
-	outcomes?: never;
+	/** Section 4 — keyed by sessionId. Optional: omitted when phase 5 is disabled. */
+	outcomesBySession?: Map<string, OutcomeData>;
 	/** Section 5 — phase 6 will populate this. */
 	proposals?: never;
 }
@@ -39,7 +41,7 @@ export function renderMarkdown(input: RenderInput): string {
 	out.push(renderEfficiency(input));
 	out.push(renderAntiPatterns(input));
 	out.push(renderOutcomes(input));
-	out.push(renderProposals(input));
+	out.push(renderProposals());
 	return out.join("\n");
 }
 
@@ -167,18 +169,72 @@ function renderAntiPatterns(input: RenderInput): string {
 	return lines.join("\n");
 }
 
-function renderOutcomes(_input: RenderInput): string {
-	// Phase 5 will replace this. Until then we emit a placeholder so the
-	// section headers in the report stay stable across phases.
-	return [
-		"## 4. Outcomes",
-		"",
-		"(not yet implemented — phase 5)",
-		"",
-	].join("\n");
+function renderOutcomes(input: RenderInput): string {
+	const lines: string[] = [];
+	lines.push("## 4. Outcomes");
+	lines.push("");
+
+	if (!input.outcomesBySession || input.outcomesBySession.size === 0) {
+		lines.push("(no findings)");
+		lines.push("");
+		return lines.join("\n");
+	}
+
+	// Order outcomes by session start time so the table reads chronologically.
+	const sessionsByStart = [...input.sessionMetrics].sort((a, b) =>
+		a.startedAt.localeCompare(b.startedAt),
+	);
+
+	lines.push("| Session | Commits | Reverted later | Last tool errored |");
+	lines.push("|---|---:|:---:|:---:|");
+	for (const sm of sessionsByStart) {
+		const out = input.outcomesBySession.get(sm.sessionId);
+		if (!out) continue;
+		const sessLabel = sm.sessionId.slice(0, 8);
+		const commits = out.gitUnavailable
+			? "git n/a"
+			: String(out.commitsInWindow.length);
+		const reverted = out.gitUnavailable
+			? "—"
+			: out.revertedShas.length > 0
+				? `⚠ ${out.revertedShas.length}`
+				: "—";
+		const lastErrored =
+			out.lastToolWasError === null
+				? "—"
+				: out.lastToolWasError
+					? "⚠ yes"
+					: "—";
+		lines.push(`| \`${sessLabel}\` | ${commits} | ${reverted} | ${lastErrored} |`);
+	}
+	lines.push("");
+
+	// Per-session detail when there's something interesting (commits, reverts, or git n/a)
+	const notable = [...sessionsByStart]
+		.map((sm) => ({ sm, out: input.outcomesBySession!.get(sm.sessionId) }))
+		.filter(({ out }) => out && (out.gitUnavailable || out.commitsInWindow.length > 0));
+	if (notable.length > 0) {
+		for (const { sm, out } of notable) {
+			if (!out) continue;
+			lines.push(`### Session \`${sm.sessionId.slice(0, 8)}\``);
+			lines.push("");
+			if (out.gitUnavailable) {
+				lines.push(`- *git unavailable: ${out.gitUnavailableReason ?? "unknown"}*`);
+				lines.push("");
+				continue;
+			}
+			for (const c of out.commitsInWindow) {
+				const marker = out.revertedShas.includes(c.sha) ? " ⚠ reverted later" : "";
+				lines.push(`- \`${c.sha.slice(0, 8)}\` ${c.subject}${marker}`);
+			}
+			lines.push("");
+		}
+	}
+
+	return lines.join("\n");
 }
 
-function renderProposals(_input: RenderInput): string {
+function renderProposals(): string {
 	return [
 		"## 5. Propose",
 		"",

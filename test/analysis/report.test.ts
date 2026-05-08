@@ -5,6 +5,7 @@ import {
 	extractMetrics,
 	type SessionMetrics,
 } from "../../src/analysis/metrics.js";
+import type { OutcomeData } from "../../src/analysis/outcomes.js";
 import { renderMarkdown } from "../../src/analysis/report.js";
 import type {
 	AntiPatternHit,
@@ -233,6 +234,99 @@ describe("renderMarkdown", () => {
 		const zPos = md.indexOf("`z-rule`");
 		expect(aPos).toBeGreaterThan(0);
 		expect(zPos).toBeGreaterThan(aPos);
+	});
+
+	it("renders an outcomes table when outcomesBySession is provided", () => {
+		const session = makeSession([tc("read")]);
+		const m = extractMetrics(session);
+		const agg = aggregateMetrics([m], [session.events]);
+		const outcome: OutcomeData = {
+			sessionId: "s-1",
+			cwd: "/proj",
+			windowStart: "2026-05-08T10:00:00.000Z",
+			windowEnd: "2026-05-08T10:05:00.000Z",
+			gitUnavailable: false,
+			commitsInWindow: [
+				{ sha: "abc12345".padEnd(40, "0"), subject: "Add feature X", timestamp: "2026-05-08T10:01:00+00:00" },
+			],
+			revertedShas: [],
+			lastToolWasError: false,
+		};
+		const md = renderMarkdown({
+			generatedAt: FIXED_DATE,
+			sessionMetrics: [m],
+			aggregated: agg,
+			hitsBySession: new Map(),
+			outcomesBySession: new Map([["s-1", outcome]]),
+		});
+		expect(md).toContain("| Session | Commits | Reverted later | Last tool errored |");
+		expect(md).toContain("`s-1`".slice(0, 4)); // truncated to 8 chars; check sha8 prefix
+		expect(md).toContain("Add feature X");
+	});
+
+	it("flags reverted commits with a warning glyph", () => {
+		const session = makeSession([tc("read")]);
+		const m = extractMetrics(session);
+		const agg = aggregateMetrics([m], [session.events]);
+		const sha = "feedface".padEnd(40, "0");
+		const outcome: OutcomeData = {
+			sessionId: "s-1",
+			cwd: "/proj",
+			windowStart: "2026-05-08T10:00:00.000Z",
+			windowEnd: "2026-05-08T10:05:00.000Z",
+			gitUnavailable: false,
+			commitsInWindow: [
+				{ sha, subject: "Buggy thing", timestamp: "2026-05-08T10:01:00+00:00" },
+			],
+			revertedShas: [sha],
+			lastToolWasError: false,
+		};
+		const md = renderMarkdown({
+			generatedAt: FIXED_DATE,
+			sessionMetrics: [m],
+			aggregated: agg,
+			hitsBySession: new Map(),
+			outcomesBySession: new Map([["s-1", outcome]]),
+		});
+		expect(md).toContain("⚠ 1"); // count of reverted in table
+		expect(md).toContain("⚠ reverted later"); // per-commit detail
+	});
+
+	it("renders 'git n/a' for sessions where git was unavailable", () => {
+		const session = makeSession([tc("read")]);
+		const m = extractMetrics(session);
+		const agg = aggregateMetrics([m], [session.events]);
+		const outcome: OutcomeData = {
+			sessionId: "s-1",
+			cwd: "/missing",
+			windowStart: "2026-05-08T10:00:00.000Z",
+			windowEnd: "2026-05-08T10:05:00.000Z",
+			gitUnavailable: true,
+			gitUnavailableReason: "cwd is not a git repository",
+			commitsInWindow: [],
+			revertedShas: [],
+			lastToolWasError: null,
+		};
+		const md = renderMarkdown({
+			generatedAt: FIXED_DATE,
+			sessionMetrics: [m],
+			aggregated: agg,
+			hitsBySession: new Map(),
+			outcomesBySession: new Map([["s-1", outcome]]),
+		});
+		expect(md).toContain("git n/a");
+		expect(md).toContain("git unavailable: cwd is not a git repository");
+	});
+
+	it("renders '(no findings)' for outcomes when outcomesBySession is omitted", () => {
+		const md = renderMarkdown({
+			generatedAt: FIXED_DATE,
+			sessionMetrics: [],
+			aggregated: aggregateMetrics([], []),
+			hitsBySession: new Map(),
+		});
+		const section = md.split("## 4. Outcomes")[1].split("## 5.")[0];
+		expect(section).toContain("(no findings)");
 	});
 
 	it("includes the malformed-line count in the summary when nonzero", () => {
