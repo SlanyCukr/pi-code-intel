@@ -80,13 +80,18 @@ async function main(): Promise<void> {
 
 		// What MUST be in the extracted package — these are the
 		// boundary assets that have been forgotten in past rounds.
-		const expectedAssets = [
+	const expectedAssets = [
 			"dist/extension.js",
 			"dist/analysis/cli-main.js",
 			"dist/scripts/parse-session.py",
 			"dist/prompt/system-prompt.source.ts",
 			"dist/agents/templates",
 			"dist/commands/templates",
+			// LICENSE: required by package.json#license:"MIT". codex
+			// round 4 spotted that package.json#files referenced LICENSE
+			// but no file existed. npm pack silently skips missing files
+			// in the allowlist, so the dead reference would have shipped.
+			"LICENSE",
 		];
 		for (const rel of expectedAssets) {
 			assert.ok(

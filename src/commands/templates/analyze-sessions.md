@@ -4,7 +4,7 @@ description: Analyze pi sessions for code-search efficiency, anti-patterns, outc
 argument-hint: e.g. --since 7d, --propose, --session <uuid>
 ---
 
-Run `node $EXTENSION_DIST/analysis/cli-main.js $ARGUMENTS` and present the resulting report.
+Run `node "$EXTENSION_DIST/analysis/cli-main.js" $ARGUMENTS` and present the resulting report.
 
 After the script completes, summarize the top three actionable findings yourself — do not dump the full report verbatim. Focus on:
 - The two ratios most out of proportion (read:lsp, grep:lsp).

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getAgentDir } from "@mariozechner/pi-coding-agent";
 
 import { aggregateMetrics, extractMetrics } from "./metrics.js";
 import { correlateOutcomes, type OutcomeData } from "./outcomes.js";
@@ -193,9 +193,15 @@ export function encodeSessionDirName(cwd: string): string {
 /**
  * Resolve the absolute path to the pi sessions directory for a given
  * working directory.
+ *
+ * Uses the SDK's `getAgentDir()` so this honors the `PI_CODING_AGENT_DIR`
+ * (and forks-of-pi equivalents like `TAU_CODING_AGENT_DIR`) environment
+ * variable. Hardcoding `~/.pi/agent` would silently miss every session
+ * for users who relocate their agent dir — the analyzer would print
+ * "no sessions found" despite the data being present elsewhere.
  */
 export function resolveSessionsDir(cwd: string): string {
-	return join(homedir(), ".pi", "agent", "sessions", encodeSessionDirName(cwd));
+	return join(getAgentDir(), "sessions", encodeSessionDirName(cwd));
 }
 
 /**

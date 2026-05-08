@@ -237,6 +237,13 @@ describe("registerCommands", () => {
 		// against src/ or dist/), but it must be absolute and end with the
 		// expected analyzer entry.
 		expect(expanded).toMatch(/\/analysis\/cli-main\.js/);
+
+		// Regression (round-4 codex finding): the expanded path MUST be
+		// shell-quoted so install paths containing spaces (e.g. macOS
+		// `~/Library/Application Support/...`) don't get word-split. We
+		// require the dist path to be enclosed in double quotes inside the
+		// expanded prompt.
+		expect(expanded).toMatch(/"[^"]*\/analysis\/cli-main\.js"/);
 	});
 
 	it("skips registration if pi.registerCommand is not available", async () => {

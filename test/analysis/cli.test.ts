@@ -39,9 +39,35 @@ describe("encodeSessionDirName", () => {
 });
 
 describe("resolveSessionsDir", () => {
-	it("returns ~/.pi/agent/sessions/<encoded-cwd>/", () => {
+	const envBackup = { ...process.env };
+	afterEach(() => {
+		// Vitest doesn't reset process.env between tests; do it manually.
+		for (const k of Object.keys(process.env)) delete process.env[k];
+		Object.assign(process.env, envBackup);
+	});
+
+	it("returns ~/.pi/agent/sessions/<encoded-cwd>/ by default", () => {
+		delete process.env.PI_CODING_AGENT_DIR;
 		const result = resolveSessionsDir("/foo/bar");
 		expect(result).toMatch(/\/\.pi\/agent\/sessions\/--foo-bar--$/);
+	});
+
+	it("honors PI_CODING_AGENT_DIR when set (regression: round-4 codex finding)", () => {
+		// Pi (and forks like Tau) support relocating the agent dir via
+		// $PI_CODING_AGENT_DIR. Hardcoded ~/.pi/agent missed every session
+		// for users who set this. The fix routes through the SDK's
+		// getAgentDir() which honors the env var.
+		process.env.PI_CODING_AGENT_DIR = "/custom/agent";
+		const result = resolveSessionsDir("/foo/bar");
+		expect(result).toBe("/custom/agent/sessions/--foo-bar--");
+	});
+
+	it("expands ~ in PI_CODING_AGENT_DIR", () => {
+		process.env.PI_CODING_AGENT_DIR = "~/custom-pi";
+		const result = resolveSessionsDir("/foo/bar");
+		// SDK expands the leading tilde.
+		expect(result).toMatch(/\/custom-pi\/sessions\/--foo-bar--$/);
+		expect(result.startsWith("~")).toBe(false);
 	});
 });
 
