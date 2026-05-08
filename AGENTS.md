@@ -81,6 +81,8 @@ Lightweight stdio JSON-RPC client. MCP stdio framing is **newline-delimited JSON
 
 The Context7 server's tool surface evolved since the original integration: `resolve-library-id` requires both `libraryName` (matching) and `query` (ranking); the docs tool was renamed `query-docs` (was `get-library-docs`) and takes `libraryId` + `query`. `resolveLibrary` therefore takes a query parameter so the topic flows through to ranking.
 
+The MCP server version is pinned via the `CONTEXT7_MCP_VERSION` constant (currently `^2.2.4`). An unpinned `npx -y @upstash/context7-mcp` would silently pull whatever ships next — a breaking tool-rename in any future minor would take this extension dark with no warning. The MCP smoke test in CI is responsible for catching drift within the accepted range; if it fails, tighten the pin in `src/web/context7.ts`.
+
 Process event handlers (`data`, `error`, `exit`) are identity-guarded against the spawned `ChildProcess`: a late event from a previously-killed process must be a no-op for the new one. Per-line cap is 10MB — a server that streams gigabytes without ever emitting a newline triggers `stop()`. Tool calls that return `isError: true` throw rather than silently treating the error message as data.
 
 ### Summarizer (`src/web/summarizer.ts`)

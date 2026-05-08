@@ -46,12 +46,28 @@ interface PendingRequest {
 }
 
 /**
+ * Pinned Context7 MCP server version.
+ *
+ * The Context7 server's tool surface drifted in 2.2.x (`get-library-docs`
+ * was renamed to `query-docs`, the resolve tool gained a required `query`
+ * parameter). An unpinned `npx -y @upstash/context7-mcp` would silently
+ * pull whatever ships next — a breaking change in any future minor would
+ * take this extension dark with no signal until a user noticed.
+ *
+ * `^2.2.4` accepts patches (security/bug fixes) and future 2.x minors but
+ * refuses 3.0.0+. The MCP smoke test in CI is responsible for catching
+ * any drift within the accepted range; if it fails, tighten this pin.
+ */
+const CONTEXT7_MCP_VERSION = "^2.2.4";
+const CONTEXT7_MCP_PACKAGE = `@upstash/context7-mcp@${CONTEXT7_MCP_VERSION}`;
+
+/**
  * Lightweight MCP stdio client for Context7.
  *
- * Spawns `npx -y @upstash/context7-mcp` and communicates via JSON-RPC
- * over stdin/stdout. MCP framing is newline-delimited JSON (one message
- * per line) — NOT LSP-style `Content-Length`. See `processBuffer` for
- * the framing details.
+ * Spawns `npx -y @upstash/context7-mcp@<pinned>` and communicates via
+ * JSON-RPC over stdin/stdout. MCP framing is newline-delimited JSON (one
+ * message per line) — NOT LSP-style `Content-Length`. See `processBuffer`
+ * for the framing details.
  *
  * Server-initiated notifications (messages without an `id`) are ignored —
  * this client only uses request/response pairs.
@@ -81,7 +97,7 @@ export class Context7Client {
 	}
 
 	private async _start(): Promise<void> {
-		const proc = spawn("npx", ["-y", "@upstash/context7-mcp"], {
+		const proc = spawn("npx", ["-y", CONTEXT7_MCP_PACKAGE], {
 			stdio: ["pipe", "pipe", "pipe"],
 			env: { ...process.env },
 		});
@@ -139,7 +155,7 @@ export class Context7Client {
 			this.stop();
 			throw new Error(
 				`Failed to initialize Context7 MCP server: ${err instanceof Error ? err.message : err}. ` +
-				`Ensure 'npx -y @upstash/context7-mcp' can run successfully.`,
+				`Ensure 'npx -y ${CONTEXT7_MCP_PACKAGE}' can run successfully.`,
 			);
 		}
 
