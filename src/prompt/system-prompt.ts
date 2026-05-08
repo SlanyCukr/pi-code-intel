@@ -1,8 +1,6 @@
 import { buildCodeExplorationGuidance } from "./code-exploration.js";
 
 export interface SystemPromptOptions {
-	hasLsp: boolean;
-	hasAgent: boolean;
 	/** Tool names currently active */
 	activeTools: string[];
 	/** Tool prompt snippets from extensions (name -> one-liner) */
@@ -19,13 +17,13 @@ export interface SystemPromptOptions {
  * integrity, and code intelligence workflow for LSP tool routing.
  */
 export function buildSystemPrompt(options: SystemPromptOptions): string {
-	const {
-		hasLsp,
-		hasAgent,
-		activeTools,
-		toolSnippets,
-		piSystemPrompt,
-	} = options;
+	const { activeTools, toolSnippets, piSystemPrompt } = options;
+
+	// Derive feature flags from active tool names
+	const hasLsp = activeTools.includes("lsp");
+	const hasAgent = activeTools.includes("agent");
+	const hasFetch = activeTools.includes("fetch");
+	const hasContext7 = activeTools.includes("context7");
 
 	const sections: string[] = [];
 
@@ -56,18 +54,28 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
 		sections.push(codeExploration);
 	}
 
-	// 8. Sub-agent delegation (if agent tool active)
+	// 8. Web fetch guidance (if fetch tool active)
+	if (hasFetch) {
+		sections.push(WEB_FETCH_GUIDANCE);
+	}
+
+	// 9. Context7 guidance (if context7 tool active)
+	if (hasContext7) {
+		sections.push(CONTEXT7_GUIDANCE);
+	}
+
+	// 10. Sub-agent delegation (if agent tool active)
 	if (hasAgent) {
 		sections.push(SUB_AGENT_SECTION);
 	}
 
-	// 9. Extract and append project context from pi's prompt (AGENTS.md, skills, etc.)
+	// 11. Extract and append project context from pi's prompt (AGENTS.md, skills, etc.)
 	const projectContext = extractProjectContext(piSystemPrompt);
 	if (projectContext) {
 		sections.push(projectContext);
 	}
 
-	// 10. Date and working directory
+	// 12. Date and working directory
 	const date = new Date().toISOString().slice(0, 10);
 	const cwd = process.cwd().replace(/\\/g, "/");
 	sections.push(`Current date: ${date}\nCurrent working directory: ${cwd}`);
@@ -131,6 +139,8 @@ function buildToolsSection(
 		write: "Create new files or complete rewrites",
 		lsp: "Language Server Protocol for structural code navigation",
 		agent: "Delegate tasks to specialized sub-agents that run independently",
+		fetch: "Fetch URLs and extract content from web pages, documentation, and APIs",
+		context7: "Look up version-specific library documentation and code examples",
 	};
 
 	const lines = activeTools.map((name) => {
@@ -185,6 +195,27 @@ grep and find via bash automatically respect .gitignore (node_modules/, .next/, 
 Still use dedicated tools when they exist:
 - Read files: use the read tool (NOT cat/head/tail via bash) — read returns structured content, bash cat wastes tokens on formatting
 - Edit files: use the edit tool (NOT sed/awk via bash) — edit fails if the target text doesn't match, catching stale-file errors
+</instruction>`;
+
+// -- Web fetch guidance --
+
+const WEB_FETCH_GUIDANCE = `<instruction>
+## Web fetch
+
+Use fetch for: library documentation, API references, release notes, issue details, error message lookups.
+Do NOT use fetch for: local files (use read), GitHub PRs/issues (use gh CLI via bash), URLs you've recently fetched (results are cached briefly).
+The prompt parameter SHOULD describe what specific information you need — not just "summarize this page".
+Large pages are automatically summarized; small pages return full markdown content.
+</instruction>`;
+
+// -- Context7 guidance --
+
+const CONTEXT7_GUIDANCE = `<instruction>
+## Library documentation (context7)
+
+Use context7 for: looking up library APIs, finding usage examples, checking version-specific behavior.
+Use fetch instead for: general web pages, blog posts, GitHub issues, non-library documentation.
+The library parameter SHOULD be the npm/pip/crate package name. The topic SHOULD be specific — e.g., "useEffect cleanup" rather than "hooks".
 </instruction>`;
 
 // -- Design integrity (Oh My Pi) --

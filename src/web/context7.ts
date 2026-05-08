@@ -1,0 +1,443 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { Type, type Static } from "@sinclair/typebox";
+import type {
+	ToolDefinition,
+	AgentToolUpdateCallback,
+	ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+
+export const CONTEXT7_TOOL_NAME = "context7";
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+// Defense-in-depth bound on declared frame size. The MCP child process is
+// trusted on the happy path, but a compromised package could send
+// `Content-Length: 2147483647` followed by a stream of garbage; without a
+// cap we would buffer the entire stream until OOM. Library docs are well
+// under this size in practice.
+const MAX_FRAME_BYTES = 10 * 1024 * 1024; // 10MB
+
+// -- JSON-RPC over stdio (MCP protocol) --
+
+interface JsonRpcRequest {
+	jsonrpc: "2.0";
+	id: number;
+	method: string;
+	params?: unknown;
+}
+
+interface JsonRpcSuccessResponse {
+	jsonrpc: "2.0";
+	id: number;
+	result: unknown;
+}
+
+interface JsonRpcErrorResponse {
+	jsonrpc: "2.0";
+	id: number;
+	error: { code: number; message: string; data?: unknown };
+}
+
+type JsonRpcResponse = JsonRpcSuccessResponse | JsonRpcErrorResponse;
+
+interface PendingRequest {
+	resolve: (value: unknown) => void;
+	reject: (reason: Error) => void;
+}
+
+/**
+ * Lightweight MCP stdio client for Context7.
+ *
+ * Spawns `npx -y @upstash/context7-mcp` and communicates via JSON-RPC
+ * over stdin/stdout with Content-Length framing (same protocol as LSP).
+ *
+ * Server-initiated notifications (messages without an `id`) are ignored —
+ * this client only uses request/response pairs.
+ */
+export class Context7Client {
+	private process: ChildProcess | null = null;
+	private nextId = 1;
+	private pending = new Map<number, PendingRequest>();
+	private buffer = Buffer.alloc(0);
+	private initialized = false;
+	private startPromise: Promise<void> | null = null;
+
+	/**
+	 * Start the Context7 MCP server process.
+	 * Lazy — called automatically on first tool invocation.
+	 */
+	async start(): Promise<void> {
+		if (this.initialized) return;
+		if (this.startPromise) return this.startPromise;
+
+		this.startPromise = this._start();
+		try {
+			await this.startPromise;
+		} finally {
+			this.startPromise = null;
+		}
+	}
+
+	private async _start(): Promise<void> {
+		const proc = spawn("npx", ["-y", "@upstash/context7-mcp"], {
+			stdio: ["pipe", "pipe", "pipe"],
+			env: { ...process.env },
+		});
+		this.process = proc;
+
+		// Each handler captures the spawned process identity. After stop()+start(),
+		// the old process's late `exit`/`error`/`data` events would otherwise mutate
+		// the new client state — falsely marking it uninitialized, rejecting its
+		// pending requests, or concatenating stale stdout into the new buffer.
+		// Same identity-guard pattern as LspClientManager.spawnAndInitialize.
+		proc.stdout!.on("data", (chunk: Buffer) => {
+			if (this.process !== proc) return;
+			this.buffer = Buffer.concat([this.buffer, chunk]);
+			this.processBuffer();
+		});
+
+		proc.stderr!.on("data", (chunk: Buffer) => {
+			const text = chunk.toString("utf-8").trim();
+			if (text) {
+				console.error(`[context7] ${text}`);
+			}
+		});
+
+		proc.on("error", (err) => {
+			console.error(`[context7] Failed to spawn process: ${err.message}`);
+			if (this.process !== proc) return;
+			this.initialized = false;
+			for (const [, req] of this.pending) {
+				req.reject(new Error(`Context7 process failed to start: ${err.message}`));
+			}
+			this.pending.clear();
+			this.process = null;
+		});
+
+		proc.on("exit", (code) => {
+			console.error(`[context7] Process exited with code ${code}`);
+			if (this.process !== proc) return;
+			this.initialized = false;
+			// Reject all pending requests
+			for (const [, req] of this.pending) {
+				req.reject(new Error(`Context7 process exited with code ${code}`));
+			}
+			this.pending.clear();
+			this.process = null;
+		});
+
+		// MCP initialize handshake — clean up process on failure to prevent leaks
+		try {
+			await this.sendRequest("initialize", {
+				protocolVersion: "2024-11-05",
+				capabilities: {},
+				clientInfo: { name: "pi-code-intel", version: "0.1.0" },
+			}, 60_000).promise; // 60s timeout: npx may need to download the package on first run
+		} catch (err) {
+			this.stop();
+			throw new Error(
+				`Failed to initialize Context7 MCP server: ${err instanceof Error ? err.message : err}. ` +
+				`Ensure 'npx -y @upstash/context7-mcp' can run successfully.`,
+			);
+		}
+
+		// Send initialized notification (no response expected)
+		if (!this.process?.stdin?.writable) {
+			this.stop();
+			throw new Error("Context7 process stdin closed during initialization");
+		}
+		this.sendNotification("notifications/initialized", {});
+
+		this.initialized = true;
+	}
+
+	/**
+	 * Process buffered stdout data, extracting complete JSON-RPC messages.
+	 *
+	 * Uses Content-Length framing (same as LSP protocol).
+	 * Buffer is binary to correctly handle multi-byte UTF-8 characters —
+	 * Content-Length is a byte count, not a character count.
+	 */
+	private processBuffer(): void {
+		const SEPARATOR = Buffer.from("\r\n\r\n");
+
+		while (true) {
+			const headerEnd = this.buffer.indexOf(SEPARATOR);
+			if (headerEnd === -1) break;
+
+			const header = this.buffer.subarray(0, headerEnd).toString("utf-8");
+			const match = header.match(/Content-Length:\s*(\d+)/i);
+			if (!match) {
+				console.error(`[context7] Malformed header in server response (no Content-Length), skipping: ${JSON.stringify(header.slice(0, 200))}`);
+				this.buffer = this.buffer.subarray(headerEnd + 4);
+				continue;
+			}
+
+			const contentLength = Number.parseInt(match[1]);
+			if (
+				!Number.isFinite(contentLength) ||
+				contentLength < 0 ||
+				contentLength > MAX_FRAME_BYTES
+			) {
+				console.error(
+					`[context7] Refusing frame with Content-Length ${contentLength} (max ${MAX_FRAME_BYTES}); tearing down process`,
+				);
+				// Bogus framing means everything that follows is also unparseable.
+				// Tear down so subsequent calls force a clean restart.
+				this.stop();
+				return;
+			}
+			const bodyStart = headerEnd + 4;
+			const bodyEnd = bodyStart + contentLength;
+
+			if (this.buffer.length < bodyEnd) {
+				break; // Incomplete body, wait for more data
+			}
+
+			const body = this.buffer.subarray(bodyStart, bodyEnd).toString("utf-8");
+			this.buffer = this.buffer.subarray(bodyEnd);
+
+			try {
+				const msg = JSON.parse(body) as JsonRpcResponse;
+				if (msg.id !== undefined) {
+					const pending = this.pending.get(msg.id);
+					if (pending) {
+						this.pending.delete(msg.id);
+						if ("error" in msg) {
+							pending.reject(new Error(`Context7 error: ${msg.error.message}`));
+						} else {
+							pending.resolve(msg.result);
+						}
+					}
+				}
+			} catch (err) {
+				console.error(
+					`[context7] Failed to parse JSON-RPC message (${body.length} bytes). Body preview: ${body.slice(0, 200)}`,
+					err instanceof Error ? err.message : err,
+				);
+				// Attempt to extract id to reject the pending request rather than letting it hang
+				const idMatch = body.match(/"id"\s*:\s*(\d+)/);
+				if (idMatch) {
+					const id = Number.parseInt(idMatch[1]);
+					const pending = this.pending.get(id);
+					if (pending) {
+						this.pending.delete(id);
+						pending.reject(new Error("Context7: received malformed JSON-RPC response"));
+					}
+				}
+			}
+		}
+	}
+
+	/** Send a JSON-RPC request and wait for the response. Returns both the promise and the request ID. */
+	private sendRequest(method: string, params?: unknown, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): { id: number; promise: Promise<unknown> } {
+		if (!this.process?.stdin?.writable) {
+			return { id: -1, promise: Promise.reject(new Error("Context7 process not running")) };
+		}
+
+		const id = this.nextId++;
+		const request: JsonRpcRequest = {
+			jsonrpc: "2.0",
+			id,
+			method,
+			params,
+		};
+
+		const body = JSON.stringify(request);
+		const header = `Content-Length: ${Buffer.byteLength(body, "utf-8")}\r\n\r\n`;
+
+		const promise = new Promise<unknown>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.pending.delete(id);
+				reject(new Error(`Context7 request ${method} timed out after ${timeoutMs}ms`));
+			}, timeoutMs);
+
+			this.pending.set(id, {
+				resolve: (value) => { clearTimeout(timer); resolve(value); },
+				reject: (reason) => { clearTimeout(timer); reject(reason); },
+			});
+			this.process!.stdin!.write(header + body);
+		});
+
+		return { id, promise };
+	}
+
+	/** Send a JSON-RPC notification (no response expected). */
+	private sendNotification(method: string, params?: unknown): void {
+		if (!this.process?.stdin?.writable) {
+			console.error(`[context7] Cannot send notification ${method}: process stdin not writable`);
+			return;
+		}
+
+		const notification = { jsonrpc: "2.0", method, params };
+		const body = JSON.stringify(notification);
+		const header = `Content-Length: ${Buffer.byteLength(body, "utf-8")}\r\n\r\n`;
+		this.process.stdin.write(header + body);
+	}
+
+	/** Call an MCP tool by name. */
+	async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+		await this.start();
+
+		// Reject early if already aborted
+		if (signal?.aborted) {
+			throw new Error("Context7 call aborted");
+		}
+
+		const { id, promise: resultPromise } = this.sendRequest("tools/call", { name, arguments: args });
+
+		if (!signal) return resultPromise;
+
+		// Race the request against the abort signal, cleaning up the pending entry on abort
+		return new Promise<unknown>((resolve, reject) => {
+			const handler = () => {
+				// Clean up the pending entry and its timer to prevent leaks
+				const pending = this.pending.get(id);
+				if (pending) {
+					this.pending.delete(id);
+					pending.reject(new Error("Context7 call aborted"));
+				}
+				reject(new Error("Context7 call aborted"));
+			};
+			signal.addEventListener("abort", handler, { once: true });
+			resultPromise
+				.then(resolve, reject)
+				.finally(() => signal.removeEventListener("abort", handler));
+		});
+	}
+
+	/** Resolve a library name to a Context7-compatible library ID. */
+	async resolveLibrary(name: string, signal?: AbortSignal): Promise<string | null> {
+		const result = await this.callTool("resolve-library-id", { libraryName: name }, signal) as {
+			content?: Array<{ type: string; text?: string }>;
+		};
+
+		const text = result?.content?.find(c => c.type === "text")?.text;
+		if (!text) return null;
+
+		// Parse the response — Context7 returns a list of matching libraries
+		// The first match is typically the best
+		const lines = text.split("\n").filter(l => l.trim());
+		for (const line of lines) {
+			// Lines look like: "- libraryId: /npm/express Description: ..."
+			const match = line.match(/Context7-compatible library ID:\s*(\S+)/i)
+				?? line.match(/\/\w+\/[\w.-]+/);
+			if (match) return match[1] ?? match[0];
+		}
+
+		return null;
+	}
+
+	/** Query documentation for a specific library and topic. */
+	async queryDocs(libraryId: string, topic: string, signal?: AbortSignal): Promise<string> {
+		const result = await this.callTool("get-library-docs", {
+			context7CompatibleLibraryID: libraryId,
+			topic,
+		}, signal) as {
+			content?: Array<{ type: string; text?: string }>;
+		};
+
+		const text = result?.content?.find(c => c.type === "text")?.text;
+		return text ?? "No documentation found.";
+	}
+
+	/** Stop the Context7 process. */
+	stop(): void {
+		if (this.process) {
+			try {
+				this.process.kill();
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException).code;
+				if (code !== "ESRCH") {
+					console.error(`[context7] Failed to kill process:`, err instanceof Error ? err.message : err);
+				}
+			}
+			this.process = null;
+			this.initialized = false;
+			this.buffer = Buffer.alloc(0);
+			for (const [, req] of this.pending) {
+				req.reject(new Error("Context7 client stopped"));
+			}
+			this.pending.clear();
+		}
+	}
+}
+
+// -- Tool definition --
+
+const context7Schema = Type.Object(
+	{
+		library: Type.String({
+			description:
+				"The library/package name to look up (e.g., 'express', 'react', 'vitest', 'langchain').",
+		}),
+		topic: Type.String({
+			description:
+				"What to look up in the library docs. Be specific — e.g., 'route middleware configuration' rather than 'routing'.",
+		}),
+	},
+	{ additionalProperties: false },
+);
+
+type Context7Input = Static<typeof context7Schema>;
+
+/**
+ * Create the Context7 library documentation tool.
+ *
+ * Returns both the tool definition and the client instance
+ * (so extension.ts can clean up the client on shutdown).
+ */
+export function createContext7Tool(): {
+	tool: ToolDefinition<typeof context7Schema>;
+	client: Context7Client;
+} {
+	const client = new Context7Client();
+
+	const tool: ToolDefinition<typeof context7Schema> = {
+		name: CONTEXT7_TOOL_NAME,
+		label: "Context7",
+		description:
+			"Look up version-specific library documentation and code examples. Resolves library name, then queries relevant documentation.",
+		parameters: context7Schema,
+		async execute(
+			_toolCallId: string,
+			input: Context7Input,
+			signal: AbortSignal | undefined,
+			onUpdate: AgentToolUpdateCallback | undefined,
+			_ctx: ExtensionContext,
+		): Promise<AgentToolResult<unknown>> {
+			onUpdate?.({
+				content: [{ type: "text" as const, text: `Looking up ${input.library} docs...` }],
+				details: undefined,
+			});
+
+			// Step 1: Resolve library
+			const libraryId = await client.resolveLibrary(input.library, signal);
+			if (!libraryId) {
+				throw new Error(
+					`Could not find library "${input.library}" in Context7. Try a more specific package name (e.g., npm package name).`,
+				);
+			}
+
+			onUpdate?.({
+				content: [
+					{
+						type: "text" as const,
+						text: `Found ${libraryId}, querying docs for "${input.topic}"...`,
+					},
+				],
+				details: undefined,
+			});
+
+			// Step 2: Query docs
+			const docs = await client.queryDocs(libraryId, input.topic, signal);
+
+			return {
+				content: [{ type: "text" as const, text: docs }],
+				details: undefined,
+			};
+		},
+	};
+
+	return { tool, client };
+}

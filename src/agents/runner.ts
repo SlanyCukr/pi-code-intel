@@ -31,9 +31,7 @@ When relevant, note in your output:
 </instruction>`;
 import type { AgentTemplate } from "./templates.js";
 import { templateNeedsWriteTools } from "./templates.js";
-// Model<any> is the canonical type used throughout pi-coding-agent
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyModel = import("@mariozechner/pi-ai").Model<any>;
+import type { AnyModel } from "../types.js";
 
 // Depth counter: prevents the extension from registering the agent tool
 // inside sub-agent sessions (createAgentSession loads extensions by default).

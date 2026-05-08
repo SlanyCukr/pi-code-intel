@@ -12,12 +12,20 @@ interface CodeIntelConfig {
 	prompt: {
 		enabled: boolean;
 	};
+	web: {
+		enabled: boolean;
+	};
+	context7: {
+		enabled: boolean;
+	};
 }
 
 const DEFAULT_CONFIG: CodeIntelConfig = {
 	lsp: { enabled: true },
 	agents: { enabled: true },
 	prompt: { enabled: true },
+	web: { enabled: true },
+	context7: { enabled: true },
 };
 
 /**
@@ -37,19 +45,21 @@ export function loadCodeIntelConfig(cwd: string): CodeIntelConfig {
 	return config;
 }
 
+const CONFIG_SECTIONS = ["lsp", "agents", "prompt", "web", "context7"] as const;
+
 function mergeConfigFile(config: CodeIntelConfig, path: string): void {
 	if (!existsSync(path)) return;
 	try {
 		const raw = JSON.parse(readFileSync(path, "utf-8"));
-		if (raw && typeof raw === "object") {
-			if (raw.lsp && typeof raw.lsp === "object") {
-				Object.assign(config.lsp, raw.lsp);
-			}
-			if (raw.agents && typeof raw.agents === "object") {
-				Object.assign(config.agents, raw.agents);
-			}
-			if (raw.prompt && typeof raw.prompt === "object") {
-				Object.assign(config.prompt, raw.prompt);
+		if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+			for (const key of CONFIG_SECTIONS) {
+				const section = raw[key];
+				if (section && typeof section === "object" && !Array.isArray(section)) {
+					// Pick only known keys to prevent injection of unknown properties
+					if (typeof section.enabled === "boolean") {
+						config[key].enabled = section.enabled;
+					}
+				}
 			}
 		}
 	} catch (err) {

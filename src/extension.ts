@@ -10,17 +10,19 @@ import {
 import { loadCodeIntelConfig } from "./config.js";
 import { loadLspConfig } from "./lsp/config.js";
 import { LspClientManager } from "./lsp/client.js";
-import { LSP_TOOL_NAME, createLspTool } from "./lsp/tool.js";
+import { createLspTool } from "./lsp/tool.js";
 import { createAgentTool } from "./agents/tool.js";
 import { isInSubAgent } from "./agents/runner.js";
 import { registerCommands } from "./commands/registry.js";
 import { buildSystemPrompt } from "./prompt/system-prompt.js";
 import { requireRtk, rtkSpawnHook } from "./rtk.js";
+import { createFetchTool } from "./web/tool.js";
+import { createContext7Tool, type Context7Client } from "./web/context7.js";
 
 /**
  * Pi extension entry point.
  *
- * Registers LSP and sub-agent tools,
+ * Registers LSP, web fetch, Context7, and sub-agent tools,
  * plus the code intelligence system prompt workflow.
  * All bash commands are routed through RTK for token-optimized output.
  */
@@ -82,8 +84,6 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 
 			return {
 				systemPrompt: buildSystemPrompt({
-					hasLsp: activeToolNames.includes(LSP_TOOL_NAME),
-					hasAgent: activeToolNames.includes("agent"),
 					activeTools: activeToolNames,
 					toolSnippets,
 					piSystemPrompt: event.systemPrompt ?? "",
@@ -113,21 +113,49 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		});
 	}
 
-	// 3. Sub-agent subsystem
+	// 3. Web fetch tool
+	let fetchTool = null;
+	if (config.web.enabled) {
+		fetchTool = createFetchTool(cwd);
+		pi.registerTool(fetchTool);
+	}
+
+	// 4. Context7 library docs tool
+	let context7Client: Context7Client | null = null;
+	let context7Tool: ToolDefinition | null = null;
+	if (config.context7.enabled) {
+		const context7Result = createContext7Tool();
+		context7Tool = context7Result.tool as unknown as ToolDefinition;
+		pi.registerTool(context7Result.tool);
+		context7Client = context7Result.client;
+		cleanupFns.push(async () => context7Client!.stop());
+	}
+
+	// 5. Sub-agent subsystem
 	// Skip agent tool registration inside sub-agent sessions — createAgentSession
 	// loads extensions by default, and we don't want sub-agents spawning nested agents.
 	if (config.agents.enabled && !isSubAgent) {
-		// Pass custom tool definitions so sub-agents can access them via createAgentSession
+		// Pass custom tool definitions so sub-agents can access them via
+		// createAgentSession. Each shared tool wraps parent-owned state
+		// (LSP manager, MCP client) whose lifecycle this extension already
+		// manages — sub-agents reuse the instance and never tear it down.
+		// Sub-agent templates filter this list by name (see runner.ts), so a
+		// tool only becomes available when a template explicitly lists it.
 		const registeredCustomTools: ToolDefinition[] = [];
-		// Reuse the already-created LSP tool instance (shares the main LSP manager instance)
 		if (lspTool) {
 			registeredCustomTools.push(lspTool as unknown as ToolDefinition);
+		}
+		if (fetchTool) {
+			registeredCustomTools.push(fetchTool as unknown as ToolDefinition);
+		}
+		if (context7Tool) {
+			registeredCustomTools.push(context7Tool);
 		}
 		const agentTool = createAgentTool(registeredCustomTools);
 		pi.registerTool(agentTool);
 	}
 
-	// 4. Format-on-write: sync files with LSP after edit/write operations
+	// 6. Format-on-write: sync files with LSP after edit/write operations
 	if (lspManager) {
 		const manager = lspManager;
 
@@ -160,7 +188,7 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		});
 	}
 
-	// 5. Cleanup on shutdown
+	// 7. Cleanup on shutdown
 	pi.on("session_shutdown", async () => {
 		await Promise.allSettled(cleanupFns.map((fn) => fn()));
 	});

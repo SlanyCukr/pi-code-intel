@@ -24,6 +24,8 @@ describe("loadCodeIntelConfig", () => {
 			lsp: { enabled: true },
 			agents: { enabled: true },
 			prompt: { enabled: true },
+			web: { enabled: true },
+			context7: { enabled: true },
 		});
 	});
 
@@ -76,6 +78,8 @@ describe("mergeConfigFile (via loadCodeIntelConfig)", () => {
 			lsp: { enabled: true },
 			agents: { enabled: true },
 			prompt: { enabled: true },
+			web: { enabled: true },
+			context7: { enabled: true },
 		});
 	});
 
@@ -91,6 +95,8 @@ describe("mergeConfigFile (via loadCodeIntelConfig)", () => {
 			lsp: { enabled: true },
 			agents: { enabled: true },
 			prompt: { enabled: true },
+			web: { enabled: true },
+			context7: { enabled: true },
 		});
 	});
 
@@ -117,16 +123,20 @@ describe("mergeConfigFile (via loadCodeIntelConfig)", () => {
 			lsp: { enabled: true },
 			agents: { enabled: true },
 			prompt: { enabled: true },
+			web: { enabled: true },
+			context7: { enabled: true },
 		});
 	});
 
-	it("merges all three sections when all are present", () => {
+	it("merges all sections when all are present", () => {
 		mockExistsSync.mockReturnValue(true);
 		mockReadFileSync.mockReturnValue(
 			JSON.stringify({
 				lsp: { enabled: false },
 				agents: { enabled: false },
 				prompt: { enabled: false },
+				web: { enabled: false },
+				context7: { enabled: false },
 			}),
 		);
 
@@ -135,5 +145,19 @@ describe("mergeConfigFile (via loadCodeIntelConfig)", () => {
 		expect(config.lsp.enabled).toBe(false);
 		expect(config.agents.enabled).toBe(false);
 		expect(config.prompt.enabled).toBe(false);
+		expect(config.web.enabled).toBe(false);
+		expect(config.context7.enabled).toBe(false);
+	});
+
+	it("ignores array values for config sections", () => {
+		mockExistsSync.mockReturnValue(true);
+		mockReadFileSync.mockReturnValue(
+			JSON.stringify({ web: [1, 2, 3], context7: "string" }),
+		);
+
+		const config = loadCodeIntelConfig("/fake/cwd");
+
+		expect(config.web.enabled).toBe(true);
+		expect(config.context7.enabled).toBe(true);
 	});
 });

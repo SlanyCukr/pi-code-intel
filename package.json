@@ -20,7 +20,8 @@
 		"test:watch": "vitest"
 	},
 	"dependencies": {
-		"@sinclair/typebox": "^0.34.0"
+		"@sinclair/typebox": "^0.34.0",
+		"turndown": "^7.2.2"
 	},
 	"peerDependencies": {
 		"@mariozechner/pi-coding-agent": ">=0.62.0"
@@ -28,6 +29,7 @@
 	"devDependencies": {
 		"@mariozechner/pi-coding-agent": "^0.62.0",
 		"@types/node": "^22.0.0",
+		"@types/turndown": "^5.0.6",
 		"typescript": "^5.7.3",
 		"vitest": "^4.1.0"
 	},

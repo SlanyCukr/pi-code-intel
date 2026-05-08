@@ -5,8 +5,6 @@ import {
 } from "../../src/prompt/system-prompt.js";
 
 const DEFAULT_OPTS: SystemPromptOptions = {
-	hasLsp: false,
-	hasAgent: false,
 	activeTools: ["read", "edit", "write", "bash"],
 	toolSnippets: {},
 	piSystemPrompt: "",
@@ -38,9 +36,8 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("Current working directory:");
 	});
 
-	it("includes LSP operations when hasLsp=true and activeTools includes lsp", () => {
+	it("includes LSP operations when activeTools includes lsp", () => {
 		const prompt = buildWith({
-			hasLsp: true,
 			activeTools: [...DEFAULT_OPTS.activeTools, "lsp"],
 		});
 		expect(prompt).toContain("LSP operations");
@@ -49,16 +46,8 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("document_symbols");
 	});
 
-	it("does NOT include LSP operations when hasLsp=false", () => {
-		const prompt = buildWith({
-			hasLsp: false,
-			activeTools: [...DEFAULT_OPTS.activeTools, "lsp"],
-		});
-		expect(prompt).not.toContain("### LSP operations");
-	});
-
 	it("does NOT include LSP operations when lsp not in activeTools", () => {
-		const prompt = buildWith({ hasLsp: true });
+		const prompt = buildWith({});
 		expect(prompt).not.toContain("### LSP operations");
 	});
 
@@ -73,25 +62,47 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).not.toContain("automatically compressed");
 	});
 
-	it("includes code exploration when hasLsp=true", () => {
-		const prompt = buildWith({ hasLsp: true });
+	it("includes code exploration when lsp in activeTools", () => {
+		const prompt = buildWith({ activeTools: [...DEFAULT_OPTS.activeTools, "lsp"] });
 		expect(prompt).toContain("Code exploration protocol");
 	});
 
-	it("does NOT include code exploration when hasLsp=false", () => {
-		const prompt = buildWith({ hasLsp: false });
+	it("does NOT include code exploration when lsp not in activeTools", () => {
+		const prompt = buildWith({});
 		expect(prompt).not.toContain("Code exploration protocol");
 	});
 
-	it("includes sub-agent delegation when hasAgent=true", () => {
-		const prompt = buildWith({ hasAgent: true });
+	it("includes web fetch guidance when fetch in activeTools", () => {
+		const prompt = buildWith({ activeTools: [...DEFAULT_OPTS.activeTools, "fetch"] });
+		expect(prompt).toContain("Web fetch");
+		expect(prompt).toContain("Use fetch for:");
+	});
+
+	it("does NOT include web fetch guidance when fetch not in activeTools", () => {
+		const prompt = buildWith({});
+		expect(prompt).not.toContain("## Web fetch");
+	});
+
+	it("includes context7 guidance when context7 in activeTools", () => {
+		const prompt = buildWith({ activeTools: [...DEFAULT_OPTS.activeTools, "context7"] });
+		expect(prompt).toContain("Library documentation (context7)");
+		expect(prompt).toContain("Use context7 for:");
+	});
+
+	it("does NOT include context7 guidance when context7 not in activeTools", () => {
+		const prompt = buildWith({});
+		expect(prompt).not.toContain("Library documentation (context7)");
+	});
+
+	it("includes sub-agent delegation when agent in activeTools", () => {
+		const prompt = buildWith({ activeTools: [...DEFAULT_OPTS.activeTools, "agent"] });
 		expect(prompt).toContain("Sub-agent delegation");
 		expect(prompt).toContain("Briefing");
 		expect(prompt).toContain("Forward intelligence");
 	});
 
-	it("does NOT include sub-agent section when hasAgent=false", () => {
-		const prompt = buildWith({ hasAgent: false });
+	it("does NOT include sub-agent section when agent not in activeTools", () => {
+		const prompt = buildWith({});
 		expect(prompt).not.toContain("Sub-agent delegation");
 	});
 
