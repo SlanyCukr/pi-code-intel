@@ -55,7 +55,8 @@ export type AnalysisEvent =
 	| UserMessageEvent
 	| AssistantTextEvent
 	| CompactionEvent
-	| BranchSummaryEvent;
+	| BranchSummaryEvent
+	| SystemPromptCapturedEvent;
 
 export interface AnalysisEventBase {
 	entryId: string;
@@ -103,6 +104,29 @@ export interface BranchSummaryEvent extends AnalysisEventBase {
 	kind: "branch_summary";
 	/** Entry the branch diverged from. */
 	fromId: string;
+}
+
+/**
+ * The pi-code-intel extension records the rendered system prompt to a
+ * `custom` entry on every `before_agent_start` whose hash differs from
+ * the previous capture. Surfacing it as a first-class event lets the
+ * analyzer ground propose-mode in what the agent actually saw at the
+ * time, rather than the present-day source of `system-prompt.ts`.
+ *
+ * Only entries with `customType === "code-intel:system-prompt"` produce
+ * this event. Other `custom` entries (from other extensions) are
+ * tolerated and skipped, just like in the original reader.
+ */
+export interface SystemPromptCapturedEvent extends AnalysisEventBase {
+	kind: "system_prompt_captured";
+	/** The full rendered system prompt the LLM saw at this point in the session. */
+	text: string;
+	/** First 16 hex chars of sha256(text); used for dedupe and cross-referencing. */
+	hash: string;
+	/** ISO-8601 capture time (may differ slightly from the entry's outer timestamp). */
+	capturedAt: string;
+	/** Names of tools active when the prompt was captured. */
+	activeTools: string[];
 }
 
 /**

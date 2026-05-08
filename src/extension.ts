@@ -7,6 +7,7 @@ import {
 	isEditToolResult,
 	isWriteToolResult,
 } from "@mariozechner/pi-coding-agent";
+import { installSystemPromptCapture } from "./analysis/capture.js";
 import { loadCodeIntelConfig } from "./config.js";
 import { loadLspConfig } from "./lsp/config.js";
 import { LspClientManager } from "./lsp/client.js";
@@ -90,6 +91,19 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 				}),
 			};
 		});
+	}
+
+	// System-prompt capture for the analyze-sessions tool. Registered AFTER
+	// our own rewriter (above) so the captured text reflects the prompt as
+	// it has been chained through our own modifications, which is what the
+	// LLM sees at this handler position.
+	//
+	// Limitation, recorded honestly: other extensions registered AFTER ours
+	// can still mutate `systemPrompt` between this capture and the provider
+	// request. In practice no other extension does this in the
+	// pi-code-intel setup, so the captured text matches what the LLM saw.
+	if (config.analysis.captureSystemPrompt) {
+		installSystemPromptCapture(pi);
 	}
 
 	// 1. RTK-wrapped bash tool — overrides Pi's built-in bash with RTK rewriting

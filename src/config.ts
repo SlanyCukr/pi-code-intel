@@ -18,6 +18,19 @@ interface CodeIntelConfig {
 	context7: {
 		enabled: boolean;
 	};
+	/**
+	 * Settings consumed by the session-analysis tooling.
+	 *
+	 * `captureSystemPrompt`: when true, the extension records the rendered
+	 * system prompt to the session JSONL via `pi.appendEntry` on every
+	 * `before_agent_start` event whose prompt has changed since the last
+	 * capture. This grounds the analyzer's `propose` mode in what the
+	 * agent actually saw at the time, instead of the present-day source.
+	 * Disable to opt out of this on-disk capture.
+	 */
+	analysis: {
+		captureSystemPrompt: boolean;
+	};
 }
 
 const DEFAULT_CONFIG: CodeIntelConfig = {
@@ -26,6 +39,7 @@ const DEFAULT_CONFIG: CodeIntelConfig = {
 	prompt: { enabled: true },
 	web: { enabled: true },
 	context7: { enabled: true },
+	analysis: { captureSystemPrompt: true },
 };
 
 /**
@@ -45,21 +59,38 @@ export function loadCodeIntelConfig(cwd: string): CodeIntelConfig {
 	return config;
 }
 
-const CONFIG_SECTIONS = ["lsp", "agents", "prompt", "web", "context7"] as const;
+const SIMPLE_ENABLED_SECTIONS = [
+	"lsp",
+	"agents",
+	"prompt",
+	"web",
+	"context7",
+] as const;
 
 function mergeConfigFile(config: CodeIntelConfig, path: string): void {
 	if (!existsSync(path)) return;
 	try {
 		const raw = JSON.parse(readFileSync(path, "utf-8"));
-		if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-			for (const key of CONFIG_SECTIONS) {
-				const section = raw[key];
-				if (section && typeof section === "object" && !Array.isArray(section)) {
-					// Pick only known keys to prevent injection of unknown properties
-					if (typeof section.enabled === "boolean") {
-						config[key].enabled = section.enabled;
-					}
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+
+		// Sections with a single `enabled: boolean` knob.
+		for (const key of SIMPLE_ENABLED_SECTIONS) {
+			const section = (raw as Record<string, unknown>)[key];
+			if (section && typeof section === "object" && !Array.isArray(section)) {
+				const enabled = (section as Record<string, unknown>).enabled;
+				if (typeof enabled === "boolean") {
+					config[key].enabled = enabled;
 				}
+			}
+		}
+
+		// Analysis section has its own field shape — picked individually
+		// so unknown keys can't slip in.
+		const analysis = (raw as Record<string, unknown>).analysis;
+		if (analysis && typeof analysis === "object" && !Array.isArray(analysis)) {
+			const capture = (analysis as Record<string, unknown>).captureSystemPrompt;
+			if (typeof capture === "boolean") {
+				config.analysis.captureSystemPrompt = capture;
 			}
 		}
 	} catch (err) {

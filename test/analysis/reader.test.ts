@@ -204,7 +204,7 @@ describe("readSession", () => {
 		expect(result.events).toHaveLength(0);
 	});
 
-	it("ignores model_change, thinking_level_change, label, custom, custom_message, session_info", () => {
+	it("ignores model_change, thinking_level_change, label, foreign-customType custom, custom_message, session_info", () => {
 		const path = writeSessionFile(
 			tmp,
 			jsonl(
@@ -212,7 +212,7 @@ describe("readSession", () => {
 				{ type: "model_change", id: "m1", timestamp: "t", provider: "anthropic", modelId: "x" },
 				{ type: "thinking_level_change", id: "t1", timestamp: "t", thinkingLevel: "high" },
 				{ type: "label", id: "l1", timestamp: "t", targetId: "x", label: "checkpoint" },
-				{ type: "custom", id: "c1", timestamp: "t", customType: "ext", data: {} },
+				{ type: "custom", id: "c1", timestamp: "t", customType: "some-other-ext", data: {} },
 				{ type: "custom_message", id: "cm1", timestamp: "t", customType: "ext", content: "x", display: false },
 				{ type: "session_info", id: "si1", timestamp: "t", name: "My session" },
 			),
@@ -220,6 +220,89 @@ describe("readSession", () => {
 		const result = readSession(path);
 		expect(result.events).toHaveLength(0);
 		expect(result.totalEntries).toBe(6);
+	});
+
+	it("surfaces a system_prompt_captured event from a code-intel:system-prompt custom entry", () => {
+		const path = writeSessionFile(
+			tmp,
+			jsonl(HEADER, {
+				type: "custom",
+				id: "sp1",
+				parentId: null,
+				timestamp: "2026-05-08T10:00:01.000Z",
+				customType: "code-intel:system-prompt",
+				data: {
+					text: "You are a helpful agent. Use LSP first.",
+					hash: "abcdef0123456789",
+					capturedAt: "2026-05-08T10:00:00.500Z",
+					activeTools: ["read", "edit", "lsp"],
+				},
+			}),
+		);
+		const result = readSession(path);
+		expect(result.events).toHaveLength(1);
+		expect(result.events[0]).toMatchObject({
+			kind: "system_prompt_captured",
+			entryId: "sp1",
+			text: "You are a helpful agent. Use LSP first.",
+			hash: "abcdef0123456789",
+			capturedAt: "2026-05-08T10:00:00.500Z",
+			activeTools: ["read", "edit", "lsp"],
+		});
+	});
+
+	it("falls back to outer timestamp when capturedAt is missing", () => {
+		const path = writeSessionFile(
+			tmp,
+			jsonl(HEADER, {
+				type: "custom",
+				id: "sp1",
+				timestamp: "2026-05-08T10:00:01.000Z",
+				customType: "code-intel:system-prompt",
+				data: { text: "prompt", hash: "abc" },
+			}),
+		);
+		const result = readSession(path);
+		expect((result.events[0] as { capturedAt: string }).capturedAt).toBe(
+			"2026-05-08T10:00:01.000Z",
+		);
+	});
+
+	it("skips system-prompt customType entries with no text", () => {
+		const path = writeSessionFile(
+			tmp,
+			jsonl(HEADER, {
+				type: "custom",
+				id: "sp1",
+				timestamp: "t",
+				customType: "code-intel:system-prompt",
+				data: { hash: "abc" }, // missing text
+			}),
+		);
+		const result = readSession(path);
+		expect(result.events).toHaveLength(0);
+	});
+
+	it("filters non-string entries from activeTools defensively", () => {
+		const path = writeSessionFile(
+			tmp,
+			jsonl(HEADER, {
+				type: "custom",
+				id: "sp1",
+				timestamp: "t",
+				customType: "code-intel:system-prompt",
+				data: {
+					text: "x",
+					hash: "abc",
+					activeTools: ["read", 42, null, "lsp"],
+				},
+			}),
+		);
+		const result = readSession(path);
+		expect((result.events[0] as { activeTools: string[] }).activeTools).toEqual([
+			"read",
+			"lsp",
+		]);
 	});
 
 	it("surfaces a compaction event with tokensBefore", () => {

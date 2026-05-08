@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { SYSTEM_PROMPT_CUSTOM_TYPE } from "./capture.js";
 import type {
 	AnalysisEvent,
 	AssistantTextEvent,
@@ -6,6 +7,7 @@ import type {
 	CompactionEvent,
 	ParsedSession,
 	SessionHeader,
+	SystemPromptCapturedEvent,
 	ToolCallBlock,
 	ToolCallEvent,
 	ToolResultEvent,
@@ -127,11 +129,41 @@ export function readSession(path: string): ParsedSession {
 					fromId: String(entry.fromId ?? ""),
 				} satisfies BranchSummaryEvent);
 				break;
+			case "custom": {
+				// Most `custom` entries belong to other extensions and are
+				// invisible to the analyzer. The exception is our own
+				// `code-intel:system-prompt` entries, which carry the rendered
+				// system prompt that was in effect at this point in the session.
+				if (entry.customType === SYSTEM_PROMPT_CUSTOM_TYPE) {
+					const data = entry.data;
+					if (data && typeof data === "object") {
+						const text = typeof data.text === "string" ? data.text : "";
+						const hash = typeof data.hash === "string" ? data.hash : "";
+						const capturedAt =
+							typeof data.capturedAt === "string" ? data.capturedAt : timestamp;
+						const activeTools = Array.isArray(data.activeTools)
+							? data.activeTools.filter((t: unknown): t is string => typeof t === "string")
+							: [];
+						if (text) {
+							events.push({
+								kind: "system_prompt_captured",
+								entryId,
+								lineNumber,
+								timestamp,
+								text,
+								hash,
+								capturedAt,
+								activeTools,
+							} satisfies SystemPromptCapturedEvent);
+						}
+					}
+				}
+				break;
+			}
 			// Types we tolerate but don't surface as analysis events.
 			case "model_change":
 			case "thinking_level_change":
 			case "label":
-			case "custom":
 			case "custom_message":
 			case "session_info":
 				break;

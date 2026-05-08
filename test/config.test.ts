@@ -26,7 +26,32 @@ describe("loadCodeIntelConfig", () => {
 			prompt: { enabled: true },
 			web: { enabled: true },
 			context7: { enabled: true },
+			analysis: { captureSystemPrompt: true },
 		});
+	});
+
+	it("reads analysis.captureSystemPrompt from a project config", () => {
+		mockExistsSync.mockImplementation((path) =>
+			String(path).includes(".pi/code-intel.json") && String(path).startsWith("/fake/cwd"),
+		);
+		mockReadFileSync.mockReturnValue(
+			JSON.stringify({ analysis: { captureSystemPrompt: false } }),
+		);
+
+		const config = loadCodeIntelConfig("/fake/cwd");
+
+		expect(config.analysis.captureSystemPrompt).toBe(false);
+	});
+
+	it("ignores unknown keys inside the analysis section", () => {
+		mockExistsSync.mockReturnValue(true);
+		mockReadFileSync.mockReturnValue(
+			JSON.stringify({ analysis: { captureSystemPrompt: true, mystery: 42 } }),
+		);
+
+		const config = loadCodeIntelConfig("/fake/cwd");
+
+		expect(config.analysis).toEqual({ captureSystemPrompt: true });
 	});
 
 	it("project config overrides defaults when it exists", () => {
@@ -80,6 +105,7 @@ describe("mergeConfigFile (via loadCodeIntelConfig)", () => {
 			prompt: { enabled: true },
 			web: { enabled: true },
 			context7: { enabled: true },
+			analysis: { captureSystemPrompt: true },
 		});
 	});
 
@@ -97,6 +123,7 @@ describe("mergeConfigFile (via loadCodeIntelConfig)", () => {
 			prompt: { enabled: true },
 			web: { enabled: true },
 			context7: { enabled: true },
+			analysis: { captureSystemPrompt: true },
 		});
 	});
 
@@ -125,6 +152,7 @@ describe("mergeConfigFile (via loadCodeIntelConfig)", () => {
 			prompt: { enabled: true },
 			web: { enabled: true },
 			context7: { enabled: true },
+			analysis: { captureSystemPrompt: true },
 		});
 	});
 
