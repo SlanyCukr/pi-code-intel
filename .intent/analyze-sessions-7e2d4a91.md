@@ -21,8 +21,8 @@ This is explicitly **not** a daemon, a watcher, or a background telemetry pipeli
 ## Scope
 
 **In scope:**
-- A TypeScript CLI at `scripts/analyze-sessions.ts` runnable via `node --experimental-strip-types` (matching `scripts/copy-assets.ts` precedent).
-- Core analysis logic factored into `src/analysis/` for testability; the CLI script is a thin shim.
+- A TypeScript CLI runnable as `node dist/analysis/cli-main.js [args]` after `npm run build`. The entry point lives in `src/analysis/cli-main.ts` and is compiled into the regular `dist/` tree alongside its dependencies.
+- Core analysis logic factored into `src/analysis/` for testability; `cli-main.ts` is a thin argv-to-function shim. (We do NOT mirror the `scripts/copy-assets.ts` precedent of running source `.ts` directly via `--experimental-strip-types`: that works for build-time helpers using only Node-builtin imports, but value imports from `src/` with `.js` extensions don't resolve before tsc has produced them. Build-then-run is the honest pattern.)
 - Five report sections, each gated by a flag so callers can scope the output:
   - **Summary**: N sessions analyzed, total tool calls, top tools by frequency, total turns, total assistant tokens (where available).
   - **Efficiency**: `read:lsp` ratio, `grep:lsp` ratio, edit-failure rate, average reads per session, average tool calls per session.
@@ -79,7 +79,7 @@ This is explicitly **not** a daemon, a watcher, or a background telemetry pipeli
 **Trade-offs accepted**: Disk usage grows over time. The operator can `rm` old reports; we don't auto-prune.
 
 ### Decision: Slash command is a prompt template, not a direct script invocation
-**Chosen approach**: `/analyze-sessions` is a markdown template that, when expanded, instructs the agent to run `node --experimental-strip-types scripts/analyze-sessions.ts $ARGUMENTS` and summarize the resulting report.
+**Chosen approach**: `/analyze-sessions` is a markdown template that, when expanded, instructs the agent to run `node dist/analysis/cli-main.js $ARGUMENTS` and summarize the resulting report. (Build-then-run; the user is expected to have run `npm run build` already, since pi extensions are loaded from `dist/` anyway.)
 **Rationale**: Matches the existing slash-command mechanism (registry sends user messages; templates can't directly exec). Keeps all logic in the script; the slash command is a 5-line wrapper.
 **Trade-offs accepted**: One layer of indirection (slash command → user message → agent runs bash → script). For direct use, the operator can invoke the script directly without the slash command.
 
@@ -87,7 +87,7 @@ This is explicitly **not** a daemon, a watcher, or a background telemetry pipeli
 
 | File | Purpose |
 |------|---------|
-| `scripts/analyze-sessions.ts` | CLI entry point. Parses argv, calls `runAnalysis()`, writes report. ~50 LOC. |
+| `src/analysis/cli-main.ts` | CLI entry point. Parses argv, calls `runAnalysis()`, writes report. Built to `dist/analysis/cli-main.js`. |
 | `src/analysis/types.ts` | `SessionEvent`, `SessionMetrics`, `AntiPatternHit`, `OutcomeData`, `AnalysisReport`. |
 | `src/analysis/reader.ts` | `readSession(path)` yields typed events; handles compaction boundaries. |
 | `src/analysis/metrics.ts` | `extractMetrics(events)` computes summary + efficiency stats. |
@@ -148,7 +148,7 @@ This is explicitly **not** a daemon, a watcher, or a background telemetry pipeli
 4. **Report renderer** (`src/analysis/report.ts`, tests) + **CLI orchestration** (`src/analysis/cli.ts`) + **CLI shim** (`scripts/analyze-sessions.ts`). At this point `node scripts/analyze-sessions.ts` produces sections 1–3 against real sessions.
 5. **Outcomes** (`src/analysis/outcomes.ts`, tests). Adds section 4.
 6. **Propose** (`src/analysis/propose.ts`, tests). Adds section 5 behind `--propose`.
-7. **Slash command** (`src/commands/templates/analyze-sessions.md`).
+7. **Slash command** (`src/commands/templates/analyze-sessions.md`). Template invokes `node dist/analysis/cli-main.js $ARGUMENTS`.
 8. **Docs** (`.gitignore`, `AGENTS.md`, `README.md`).
 
 Each phase is independently committable; phases 1–4 deliver a working tool; 5 and 6 extend it.
