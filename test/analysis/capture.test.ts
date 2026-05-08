@@ -112,6 +112,22 @@ describe("installSystemPromptCapture", () => {
 		expect(pi.appendEntry).toHaveBeenCalledTimes(2);
 	});
 
+	it("does NOT register handlers for session_compact or session_tree (same-file events)", () => {
+		// session_compact and session_tree both stay in the same JSONL file
+		// (verified against pi-coding-agent agent-session.js). Hooking them
+		// would force a redundant re-capture every time a user compacts or
+		// navigates the tree, even though the previous capture in the same
+		// file is still readable by propose-mode. This test pins the
+		// observed behavior so a future maintainer who naively adds these
+		// hooks (e.g. "for symmetry") sees the test fail and reads the
+		// rationale in capture.ts.
+		const pi = makeFakePi();
+		installSystemPromptCapture(pi as any);
+		const hooked = pi.on.mock.calls.map((c) => c[0]);
+		expect(hooked).not.toContain("session_compact");
+		expect(hooked).not.toContain("session_tree");
+	});
+
 	it("appends an entry on first capture with text/hash/capturedAt/activeTools", () => {
 		const pi = makeFakePi();
 		installSystemPromptCapture(pi as any);

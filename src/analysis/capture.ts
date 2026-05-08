@@ -78,8 +78,21 @@ export function installSystemPromptCapture(pi: ExtensionAPI): void {
 	// its prompt text matches the previous file's — otherwise propose-
 	// mode falls back to source-grounding for that session.
 	//
-	// `session_switch` covers `/new` and `/resume`.
-	// `session_fork` covers fork operations (which create a separate file).
+	// Events that create a new file (need reset):
+	//   - session_switch (reason="new" or "resume"): /new, /resume
+	//   - session_fork: branching into a fresh JSONL
+	//
+	// Events that stay in the same file (do NOT need reset):
+	//   - session_compact: appendCompaction() writes to the existing
+	//     SessionManager, so prior captures remain in the same JSONL.
+	//     Verified in agent-session.js:1338, 1522.
+	//   - session_tree: sessionManager.branch(leafId) only changes the
+	//     current leaf within the existing file. Verified in
+	//     agent-session.js:2376.
+	//
+	// If a new event type is added to the SDK that creates a new file,
+	// it MUST be added here. The `Test discipline` rule in AGENTS.md
+	// covers this case under "Adjacent SDK events you didn't hook".
 	const resetHash = (): void => {
 		lastPromptHash = "";
 	};
