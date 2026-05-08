@@ -34,6 +34,20 @@ These labels are how rot accumulates. The only honest options are *fix* or *esca
 
 When in doubt, fix it. The cost of one small unnecessary commit is far smaller than the cost of an issue surviving to ten sessions from now.
 
+## Test discipline
+
+Unit tests with stubbed I/O verify your logic, not your deployment. Bugs that survive happy-path coverage live at integration boundaries your fixtures hide. "It compiles, unit tests pass, end-to-end runs once locally" is NOT proof of completeness — that pattern shipped 8 real bugs across 3 codex rounds during the analyze-sessions feature, all in code where the unit tests passed cleanly.
+
+Before declaring a feature complete, you MUST exercise it under at least these conditions:
+
+- **A different cwd.** Subdirectory of a repo, relative paths (`.`, `..`, `../proj`), non-existent paths, paths that contain no `.git`. Most path-resolution bugs hide here.
+- **A different install location.** If the feature ships `dist/`, run it from a project where only `dist/` is reachable — nothing in `src/` or `scripts/` is. Anything derived from the user's `cwd` rather than the extension's install path will be wrong.
+- **Adjacent SDK events you didn't hook.** If you hook `event_a`, list `event_b`/`event_c`/etc. (e.g. `session_switch` AND `session_fork` AND `session_compact` AND `session_tree`) and decide whether each needs the same handling. Skipping one is a silent bug — captures, dedupe, cleanup all break for the unhooked path.
+- **Documented failure modes.** Every "throws if X" or "returns null when Y" in the SDK deserves a test that triggers X / Y. If the SDK distinguishes states (e.g. error vs empty vs missing), exercise each.
+- **Real binary I/O when the boundary uses one.** Stdio framing, file-format parsing, MCP protocols — a mock that parrots the wrong protocol passes its own tests. At least one test or one local end-to-end run MUST go through the real implementation.
+
+When you're tempted to call it done, ask: which boundary do my fixtures hide? Then test what they hide. Do not claim completion until that question has an answer.
+
 ## Key Patterns
 
 ### Tool Definitions
