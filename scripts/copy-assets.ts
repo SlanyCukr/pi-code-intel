@@ -26,4 +26,16 @@ cpSync(join(root, "src", "commands", "templates"), join(dist, "commands", "templ
 mkdirSync(join(dist, "scripts"), { recursive: true });
 cpSync(join(root, "scripts", "parse-session.py"), join(dist, "scripts", "parse-session.py"));
 
+// Copy the system-prompt source to dist so the analyze-sessions tool's
+// propose mode has a fallback to feed the LLM when no captured prompts
+// exist in the analyzed sessions. Without this asset, propose mode
+// would fail in any consumer project that doesn't vendor this
+// extension's source tree — the .ts file isn't otherwise emitted into
+// dist by tsc (only the compiled .js + .d.ts).
+mkdirSync(join(dist, "prompt"), { recursive: true });
+cpSync(
+	join(root, "src", "prompt", "system-prompt.ts"),
+	join(dist, "prompt", "system-prompt.source.ts"),
+);
+
 console.log("Assets copied to dist/");

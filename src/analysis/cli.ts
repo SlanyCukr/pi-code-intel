@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { aggregateMetrics, extractMetrics } from "./metrics.js";
 import { correlateOutcomes, type OutcomeData } from "./outcomes.js";
@@ -9,6 +10,12 @@ import { generateProposals } from "./propose.js";
 import { readSession } from "./reader.js";
 import { renderMarkdown } from "./report.js";
 import type { AntiPatternHit, ParsedSession } from "./types.js";
+
+/**
+ * `__dirname` for this module after compilation: `<dist>/analysis/`.
+ * Used to resolve sibling assets shipped via copy-assets.ts.
+ */
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
 /**
  * CLI input — parsed shape consumed by `runAnalysis`.
@@ -118,7 +125,7 @@ export async function runAnalysis(args: AnalysisArgs): Promise<AnalysisResult> {
 				sessionMetrics: perSession,
 				hitsBySession,
 				parsedSessions: parsed,
-				systemPromptSourcePath: join(args.cwd, "src", "prompt", "system-prompt.ts"),
+				systemPromptSourcePath: resolveSystemPromptFallback(args.cwd),
 			},
 			{
 				cwd: args.cwd,
@@ -149,6 +156,27 @@ export async function runAnalysis(args: AnalysisArgs): Promise<AnalysisResult> {
 		sessionFilesAnalyzed: parsed.map((p) => p.filePath),
 		sessionFilesSkipped: skipped,
 	};
+}
+
+/**
+ * Where to find the system-prompt source for propose-mode fallback.
+ *
+ * Search order:
+ * 1. `<dist>/prompt/system-prompt.source.ts` — shipped by copy-assets.
+ *    This is the path that works when the extension is installed as
+ *    a compiled package (the analyzed project doesn't vendor our src/).
+ * 2. `<analyzed-project>/src/prompt/system-prompt.ts` — only useful
+ *    when the operator is analyzing this very repo's own checkout.
+ *    Kept as a secondary path so dev iteration on the source still
+ *    surfaces the latest content even if the dist hasn't been rebuilt.
+ *
+ * If neither path exists, the propose mode emits a clear `(skipped:...)`
+ * placeholder rather than failing.
+ */
+export function resolveSystemPromptFallback(analyzedCwd: string): string {
+	const bundled = join(MODULE_DIR, "..", "prompt", "system-prompt.source.ts");
+	if (existsSync(bundled)) return bundled;
+	return join(analyzedCwd, "src", "prompt", "system-prompt.ts");
 }
 
 /**

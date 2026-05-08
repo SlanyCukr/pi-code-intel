@@ -20,15 +20,19 @@ interface FakePi {
 	getHandler(): (event: { systemPrompt?: string }) => void;
 	/** The captured handler for `session_switch`. */
 	getSwitchHandler(): (event: unknown) => void;
+	/** The captured handler for `session_fork`. */
+	getForkHandler(): (event: unknown) => void;
 }
 
 function makeFakePi(opts: { withAppendEntry?: boolean; appendEntryThrows?: Error } = {}): FakePi {
 	const captured: Array<(event: any) => void> = [];
 	const switchCaptured: Array<(event: any) => void> = [];
+	const forkCaptured: Array<(event: any) => void> = [];
 	const fake: any = {
 		on: vi.fn((eventName: string, handler: (event: any) => void) => {
 			if (eventName === "before_agent_start") captured.push(handler);
 			if (eventName === "session_switch") switchCaptured.push(handler);
+			if (eventName === "session_fork") forkCaptured.push(handler);
 		}),
 		getActiveTools: vi.fn(() => ["read", "edit", "lsp"]),
 	};
@@ -46,6 +50,10 @@ function makeFakePi(opts: { withAppendEntry?: boolean; appendEntryThrows?: Error
 		expect(switchCaptured).toHaveLength(1);
 		return switchCaptured[0];
 	};
+	fake.getForkHandler = () => {
+		expect(forkCaptured).toHaveLength(1);
+		return forkCaptured[0];
+	};
 	return fake as FakePi;
 }
 
@@ -60,12 +68,13 @@ describe("installSystemPromptCapture", () => {
 		consoleErrorSpy.mockRestore();
 	});
 
-	it("registers handlers for before_agent_start and session_switch", () => {
+	it("registers handlers for before_agent_start, session_switch, and session_fork", () => {
 		const pi = makeFakePi();
 		installSystemPromptCapture(pi as any);
-		expect(pi.on).toHaveBeenCalledTimes(2);
+		expect(pi.on).toHaveBeenCalledTimes(3);
 		expect(pi.on).toHaveBeenCalledWith("before_agent_start", expect.any(Function));
 		expect(pi.on).toHaveBeenCalledWith("session_switch", expect.any(Function));
+		expect(pi.on).toHaveBeenCalledWith("session_fork", expect.any(Function));
 	});
 
 	it("resets the dedupe hash on session_switch so the next session captures even if the prompt is unchanged", () => {
@@ -83,6 +92,23 @@ describe("installSystemPromptCapture", () => {
 
 		// Same prompt text in the new session must produce a fresh capture.
 		onPrompt({ systemPrompt: "identical prompt" });
+		expect(pi.appendEntry).toHaveBeenCalledTimes(2);
+	});
+
+	it("resets the dedupe hash on session_fork (forks create a new JSONL file)", () => {
+		const pi = makeFakePi();
+		installSystemPromptCapture(pi as any);
+		const onPrompt = pi.getHandler();
+		const onFork = pi.getForkHandler();
+
+		onPrompt({ systemPrompt: "same prompt" });
+		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
+
+		// Fork the session
+		onFork({ type: "session_fork", previousSessionFile: "prev.jsonl" });
+
+		// Same prompt text in the forked session must produce a fresh capture.
+		onPrompt({ systemPrompt: "same prompt" });
 		expect(pi.appendEntry).toHaveBeenCalledTimes(2);
 	});
 

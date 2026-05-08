@@ -73,12 +73,16 @@ export function installSystemPromptCapture(pi: ExtensionAPI): void {
 		}
 	});
 
-	// Reset the dedupe hash whenever pi switches to another session
-	// ("/new", "/resume", forks, branches). Each session's JSONL needs
-	// at least one capture even if its prompt text matches the previous
-	// session's — otherwise propose-mode falls back to source-grounding
-	// for that session.
-	pi.on("session_switch", () => {
+	// Reset the dedupe hash on every session-boundary event that produces
+	// a NEW JSONL file. Each new file needs at least one capture even if
+	// its prompt text matches the previous file's — otherwise propose-
+	// mode falls back to source-grounding for that session.
+	//
+	// `session_switch` covers `/new` and `/resume`.
+	// `session_fork` covers fork operations (which create a separate file).
+	const resetHash = (): void => {
 		lastPromptHash = "";
-	});
+	};
+	pi.on("session_switch", resetHash);
+	pi.on("session_fork", resetHash);
 }
