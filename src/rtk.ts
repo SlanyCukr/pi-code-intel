@@ -37,8 +37,19 @@ export function requireRtk(): void {
  * BashSpawnHook that routes commands through RTK for token-optimized output.
  *
  * Uses `rtk rewrite` — RTK's single source of truth for command rewriting.
- * Exit 0 + stdout = rewritten command. Exit 1 = no rewrite, use original.
  * Handles compound commands intelligently (e.g. `cd /tmp && git status`).
+ *
+ * Exit-code semantics across rtk versions:
+ *   - 0 with stdout: rewritten command (older rtk versions, e.g. 0.31)
+ *   - 1: no rewrite available; use the original command
+ *   - 3 with stdout: rewritten command + stderr deprecation warning
+ *     (rtk 0.39+ emits this when its global hook config is outdated;
+ *     the warning is unrelated to programmatic `rewrite` usage but
+ *     shares the exit code)
+ *
+ * Anything else with empty stdout is treated as an unexpected failure
+ * and logged. The contract for callers is the same: trust the returned
+ * command.
  */
 export const rtkSpawnHook: BashSpawnHook = (
 	ctx: BashSpawnContext,
@@ -60,14 +71,34 @@ export const rtkSpawnHook: BashSpawnHook = (
 			return { ...ctx, command: rewritten };
 		}
 	} catch (err: unknown) {
-		// Exit code 1 is expected: RTK has no rewrite for this command.
-		// Any other error is unexpected and should be logged.
-		if (
-			err instanceof Error &&
-			"status" in err &&
-			(err as { status: unknown }).status === 1
-		) {
-			// Expected: no rewrite available, use original command
+		if (err instanceof Error && "status" in err) {
+			const status = (err as { status: unknown }).status;
+
+			// Exit 1: no rewrite available. Expected, fall through.
+			if (status === 1) {
+				return ctx;
+			}
+
+			// Exit 3 (or any other non-zero) with stdout content: trust
+			// stdout. rtk 0.39+ emits a deprecation warning on stderr
+			// alongside a perfectly good rewrite on stdout.
+			const stdoutRaw = (err as { stdout?: Buffer | string }).stdout;
+			const stdoutText =
+				typeof stdoutRaw === "string"
+					? stdoutRaw
+					: stdoutRaw
+						? stdoutRaw.toString("utf-8")
+						: "";
+			const rewritten = stdoutText.trim();
+			if (rewritten) {
+				return { ...ctx, command: rewritten };
+			}
+
+			// Non-zero exit with no stdout: unexpected. Log and fall through.
+			console.error(
+				`[code-intel] RTK rewrite exited ${status} with no output:`,
+				err.message,
+			);
 		} else {
 			console.error(
 				"[code-intel] RTK rewrite failed unexpectedly:",

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { requireRtk, rtkSpawnHook } from "../src/rtk.js";
 
 describe("requireRtk", () => {
@@ -73,5 +73,102 @@ describe("rtkSpawnHook", () => {
 		// echo is not rewritten by rtk, so we get the original back.
 		// This exercises the passthrough path (either empty rewrite or catch).
 		expect(result.command).toBe("echo hello");
+	});
+});
+
+// rtk's exit-code semantics drifted between versions:
+//   - 0.31: exit 0 with stdout = rewrite
+//   - 0.39: exit 3 with stdout = rewrite + a deprecation warning
+// CI caught this when the unit tests fail-pinned exit 0 against a
+// real rtk 0.39 binary. These tests pin the tolerance behavior so
+// future drift to other non-zero exit codes keeps working as long
+// as stdout has content.
+//
+// We mock node:child_process at the module boundary because ES module
+// destructured imports (`import { execFileSync } from "node:child_process"`)
+// can't be intercepted by vi.spyOn. The mock has to be hoisted to the
+// top of the file, so we put the tolerance suite in its own describe
+// guarded by a re-import that forces module re-evaluation.
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = (await importOriginal()) as typeof import("node:child_process");
+	return {
+		...actual,
+		execFileSync: vi.fn(actual.execFileSync),
+	};
+});
+
+describe("rtkSpawnHook exit-code tolerance", async () => {
+	// Re-import inside the describe so the mocked version is bound here.
+	const { execFileSync } = await import("node:child_process");
+	const mockExec = execFileSync as unknown as ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		mockExec.mockReset();
+	});
+	afterEach(() => {
+		mockExec.mockReset();
+	});
+
+	const baseCtx = { command: "", cwd: process.cwd(), env: process.env };
+
+	it("trusts stdout when rtk exits 3 (deprecation warning + valid rewrite)", () => {
+		const err: any = new Error("Command failed");
+		err.status = 3;
+		err.stdout = "rtk git status";
+		err.stderr = "[rtk] /!\\ Hook outdated";
+		mockExec.mockImplementation(() => {
+			throw err;
+		});
+
+		const result = rtkSpawnHook({ ...baseCtx, command: "git status" });
+		expect(result.command).toBe("rtk git status");
+	});
+
+	it("trusts stdout for any non-zero exit code other than 1, given content", () => {
+		const err: any = new Error("Command failed");
+		err.status = 7;
+		err.stdout = "rtk grep something";
+		mockExec.mockImplementation(() => {
+			throw err;
+		});
+
+		const result = rtkSpawnHook({ ...baseCtx, command: "grep something" });
+		expect(result.command).toBe("rtk grep something");
+	});
+
+	it("falls back to original on exit 1 (no rewrite available)", () => {
+		const err: any = new Error("Command failed");
+		err.status = 1;
+		err.stdout = "";
+		mockExec.mockImplementation(() => {
+			throw err;
+		});
+
+		const result = rtkSpawnHook({ ...baseCtx, command: "obscure-cmd" });
+		expect(result.command).toBe("obscure-cmd");
+	});
+
+	it("falls back to original on non-zero exit with empty stdout", () => {
+		const err: any = new Error("Command failed");
+		err.status = 2;
+		err.stdout = "";
+		mockExec.mockImplementation(() => {
+			throw err;
+		});
+
+		const result = rtkSpawnHook({ ...baseCtx, command: "some-cmd" });
+		expect(result.command).toBe("some-cmd");
+	});
+
+	it("handles stdout returned as a Buffer (no encoding option)", () => {
+		const err: any = new Error("Command failed");
+		err.status = 3;
+		err.stdout = Buffer.from("rtk ls -la", "utf-8");
+		mockExec.mockImplementation(() => {
+			throw err;
+		});
+
+		const result = rtkSpawnHook({ ...baseCtx, command: "ls -la" });
+		expect(result.command).toBe("rtk ls -la");
 	});
 });
