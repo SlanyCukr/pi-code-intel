@@ -121,3 +121,29 @@ export interface ParsedSession {
 	totalEntries: number;
 	malformedLines: number;
 }
+
+/**
+ * One detection from an anti-pattern rule.
+ *
+ * Each hit carries enough information for a human to verify it without
+ * the analyzer's involvement — they can open the JSONL file at the
+ * cited line range and read the raw entries.
+ */
+export interface AntiPatternHit {
+	/** Stable rule identifier (e.g. `read-twice-no-edit`). */
+	ruleId: string;
+	sessionId: string;
+	filePath: string;
+	/** Inclusive line range in the source JSONL, 1-based. */
+	lineRange: [number, number];
+	/** One-line human-readable description of this specific hit. */
+	message: string;
+}
+
+/**
+ * A detector function. Pure: takes events for ONE session, returns its
+ * hits. No I/O, no shared mutable state — trivially unit-testable.
+ */
+export type AntiPatternRule = (
+	session: ParsedSession,
+) => AntiPatternHit[];
