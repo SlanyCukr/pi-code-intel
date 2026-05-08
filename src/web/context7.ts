@@ -10,11 +10,11 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 export const CONTEXT7_TOOL_NAME = "context7";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-// Defense-in-depth bound on declared frame size. The MCP child process is
-// trusted on the happy path, but a compromised package could send
-// `Content-Length: 2147483647` followed by a stream of garbage; without a
-// cap we would buffer the entire stream until OOM. Library docs are well
-// under this size in practice.
+// Defense-in-depth bound on a single inbound message line. The MCP child
+// process is trusted on the happy path, but a compromised package could
+// stream gigabytes without ever sending a newline; without a cap we would
+// accumulate the entire stream into the parse buffer until OOM. Library
+// doc responses are well under this size in practice.
 const MAX_FRAME_BYTES = 10 * 1024 * 1024; // 10MB
 
 // -- JSON-RPC over stdio (MCP protocol) --
@@ -154,51 +154,44 @@ export class Context7Client {
 	/**
 	 * Process buffered stdout data, extracting complete JSON-RPC messages.
 	 *
-	 * Uses Content-Length framing (same as LSP protocol).
-	 * Buffer is binary to correctly handle multi-byte UTF-8 characters —
-	 * Content-Length is a byte count, not a character count.
+	 * MCP stdio transport uses NEWLINE-DELIMITED JSON (one message per line),
+	 * not LSP's `Content-Length` framing. Messages must not contain embedded
+	 * newlines. Buffer is binary to correctly handle multi-byte UTF-8
+	 * sequences when slicing on `\n`.
 	 */
 	private processBuffer(): void {
-		const SEPARATOR = Buffer.from("\r\n\r\n");
-
 		while (true) {
-			const headerEnd = this.buffer.indexOf(SEPARATOR);
-			if (headerEnd === -1) break;
-
-			const header = this.buffer.subarray(0, headerEnd).toString("utf-8");
-			const match = header.match(/Content-Length:\s*(\d+)/i);
-			if (!match) {
-				console.error(`[context7] Malformed header in server response (no Content-Length), skipping: ${JSON.stringify(header.slice(0, 200))}`);
-				this.buffer = this.buffer.subarray(headerEnd + 4);
-				continue;
+			const newlineIdx = this.buffer.indexOf(0x0a); // '\n'
+			if (newlineIdx === -1) {
+				// No complete line yet. If unframed bytes exceed the cap, treat
+				// as bogus framing — a server that never produces a newline can
+				// otherwise drive us to OOM.
+				if (this.buffer.length > MAX_FRAME_BYTES) {
+					console.error(
+						`[context7] Inbound line exceeds ${MAX_FRAME_BYTES} bytes with no newline; tearing down process`,
+					);
+					this.stop();
+					return;
+				}
+				break;
 			}
 
-			const contentLength = Number.parseInt(match[1]);
-			if (
-				!Number.isFinite(contentLength) ||
-				contentLength < 0 ||
-				contentLength > MAX_FRAME_BYTES
-			) {
+			const lineBytes = this.buffer.subarray(0, newlineIdx);
+			this.buffer = this.buffer.subarray(newlineIdx + 1);
+
+			if (lineBytes.length > MAX_FRAME_BYTES) {
 				console.error(
-					`[context7] Refusing frame with Content-Length ${contentLength} (max ${MAX_FRAME_BYTES}); tearing down process`,
+					`[context7] Inbound line ${lineBytes.length} bytes exceeds cap ${MAX_FRAME_BYTES}; tearing down process`,
 				);
-				// Bogus framing means everything that follows is also unparseable.
-				// Tear down so subsequent calls force a clean restart.
 				this.stop();
 				return;
 			}
-			const bodyStart = headerEnd + 4;
-			const bodyEnd = bodyStart + contentLength;
 
-			if (this.buffer.length < bodyEnd) {
-				break; // Incomplete body, wait for more data
-			}
-
-			const body = this.buffer.subarray(bodyStart, bodyEnd).toString("utf-8");
-			this.buffer = this.buffer.subarray(bodyEnd);
+			const line = lineBytes.toString("utf-8").trim();
+			if (!line) continue; // tolerate stray blank lines
 
 			try {
-				const msg = JSON.parse(body) as JsonRpcResponse;
+				const msg = JSON.parse(line) as JsonRpcResponse;
 				if (msg.id !== undefined) {
 					const pending = this.pending.get(msg.id);
 					if (pending) {
@@ -212,17 +205,17 @@ export class Context7Client {
 				}
 			} catch (err) {
 				console.error(
-					`[context7] Failed to parse JSON-RPC message (${body.length} bytes). Body preview: ${body.slice(0, 200)}`,
+					`[context7] Failed to parse JSON-RPC line (${line.length} bytes). Preview: ${line.slice(0, 200)}`,
 					err instanceof Error ? err.message : err,
 				);
-				// Attempt to extract id to reject the pending request rather than letting it hang
-				const idMatch = body.match(/"id"\s*:\s*(\d+)/);
+				// Attempt to extract id to reject the pending request rather than letting it hang.
+				const idMatch = line.match(/"id"\s*:\s*(\d+)/);
 				if (idMatch) {
 					const id = Number.parseInt(idMatch[1]);
 					const pending = this.pending.get(id);
 					if (pending) {
 						this.pending.delete(id);
-						pending.reject(new Error("Context7: received malformed JSON-RPC response"));
+						pending.reject(new Error("Context7: received malformed JSON-RPC line"));
 					}
 				}
 			}
@@ -243,8 +236,9 @@ export class Context7Client {
 			params,
 		};
 
+		// MCP stdio framing: one JSON message per line. JSON.stringify never
+		// emits raw newlines, so a single trailing `\n` is sufficient.
 		const body = JSON.stringify(request);
-		const header = `Content-Length: ${Buffer.byteLength(body, "utf-8")}\r\n\r\n`;
 
 		const promise = new Promise<unknown>((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -256,7 +250,7 @@ export class Context7Client {
 				resolve: (value) => { clearTimeout(timer); resolve(value); },
 				reject: (reason) => { clearTimeout(timer); reject(reason); },
 			});
-			this.process!.stdin!.write(header + body);
+			this.process!.stdin!.write(`${body}\n`);
 		});
 
 		return { id, promise };
@@ -271,8 +265,7 @@ export class Context7Client {
 
 		const notification = { jsonrpc: "2.0", method, params };
 		const body = JSON.stringify(notification);
-		const header = `Content-Length: ${Buffer.byteLength(body, "utf-8")}\r\n\r\n`;
-		this.process.stdin.write(header + body);
+		this.process.stdin.write(`${body}\n`);
 	}
 
 	/** Call an MCP tool by name. */
@@ -306,38 +299,81 @@ export class Context7Client {
 		});
 	}
 
-	/** Resolve a library name to a Context7-compatible library ID. */
-	async resolveLibrary(name: string, signal?: AbortSignal): Promise<string | null> {
-		const result = await this.callTool("resolve-library-id", { libraryName: name }, signal) as {
+	/**
+	 * Resolve a library name to a Context7-compatible library ID.
+	 *
+	 * The Context7 `resolve-library-id` tool requires both a `libraryName`
+	 * (used for matching) and a `query` (used for ranking). The query is the
+	 * topic the caller will eventually pass to `queryDocs` so the server
+	 * can rank libraries by relevance.
+	 */
+	async resolveLibrary(
+		name: string,
+		query: string,
+		signal?: AbortSignal,
+	): Promise<string | null> {
+		const result = (await this.callTool(
+			"resolve-library-id",
+			{ libraryName: name, query },
+			signal,
+		)) as {
 			content?: Array<{ type: string; text?: string }>;
+			isError?: boolean;
 		};
 
-		const text = result?.content?.find(c => c.type === "text")?.text;
+		if (result?.isError) {
+			const errText = result.content?.find((c) => c.type === "text")?.text;
+			throw new Error(
+				`Context7 resolve-library-id failed: ${errText ?? "unknown error"}`,
+			);
+		}
+
+		const text = result?.content?.find((c) => c.type === "text")?.text;
 		if (!text) return null;
 
-		// Parse the response — Context7 returns a list of matching libraries
-		// The first match is typically the best
-		const lines = text.split("\n").filter(l => l.trim());
+		// Parse the response — Context7 returns a list of matching libraries.
+		// Each entry has a `Context7-compatible library ID: /org/project` line.
+		// The first match is the highest-ranked one.
+		const lines = text.split("\n").filter((l) => l.trim());
 		for (const line of lines) {
-			// Lines look like: "- libraryId: /npm/express Description: ..."
-			const match = line.match(/Context7-compatible library ID:\s*(\S+)/i)
-				?? line.match(/\/\w+\/[\w.-]+/);
+			const match =
+				line.match(/Context7-compatible library ID:\s*(\S+)/i) ??
+				line.match(/\/\w+\/[\w.-]+/);
 			if (match) return match[1] ?? match[0];
 		}
 
 		return null;
 	}
 
-	/** Query documentation for a specific library and topic. */
-	async queryDocs(libraryId: string, topic: string, signal?: AbortSignal): Promise<string> {
-		const result = await this.callTool("get-library-docs", {
-			context7CompatibleLibraryID: libraryId,
-			topic,
-		}, signal) as {
+	/**
+	 * Query documentation for a specific library and topic.
+	 *
+	 * Uses the Context7 `query-docs` tool (renamed from the older
+	 * `get-library-docs`). Parameters: `libraryId` (e.g. `/vitest-dev/vitest`)
+	 * and `query` (the actual question/topic).
+	 */
+	async queryDocs(
+		libraryId: string,
+		query: string,
+		signal?: AbortSignal,
+	): Promise<string> {
+		const result = (await this.callTool(
+			"query-docs",
+			{ libraryId, query },
+			signal,
+		)) as {
 			content?: Array<{ type: string; text?: string }>;
+			isError?: boolean;
 		};
 
-		const text = result?.content?.find(c => c.type === "text")?.text;
+		if (result?.isError) {
+			const errText = result.content?.find((c) => c.type === "text")?.text;
+			throw new Error(
+				`Context7 query-docs failed: ${errText ?? "unknown error"}`,
+			);
+		}
+
+		const text = result?.content?.find((c) => c.type === "text")?.text;
 		return text ?? "No documentation found.";
 	}
 
@@ -411,8 +447,10 @@ export function createContext7Tool(): {
 				details: undefined,
 			});
 
-			// Step 1: Resolve library
-			const libraryId = await client.resolveLibrary(input.library, signal);
+			// Step 1: Resolve library. Context7's resolve-library-id tool needs
+			// both the library name (for matching) and the topic (for ranking),
+			// so the most-relevant library for the topic is returned first.
+			const libraryId = await client.resolveLibrary(input.library, input.topic, signal);
 			if (!libraryId) {
 				throw new Error(
 					`Could not find library "${input.library}" in Context7. Try a more specific package name (e.g., npm package name).`,

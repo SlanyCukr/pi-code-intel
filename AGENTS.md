@@ -44,7 +44,11 @@ tools: [read, bash, lsp]
 SSRF guard checks both literal IPs and DNS-resolved addresses against loopback / RFC1918 / link-local / IPv6 unique-local. Redirects are followed manually with the SSRF guard re-run on every hop (capped at 10 hops; non-HTTP(S) `Location` schemes refused). Response body is streamed and the 10MB cap is enforced per-chunk. The external abort signal listener attaches before the early SSRF DNS lookup so cancellations propagate cleanly through the entire pipeline.
 
 ### Context7 MCP client (`src/web/context7.ts`)
-Lightweight stdio JSON-RPC client. Same Content-Length framing as LSP — use `Buffer` arithmetic only. Process event handlers (`data`, `error`, `exit`) are identity-guarded against the spawned `ChildProcess`: a late event from a previously-killed process must be a no-op for the new one. Frame-size cap is 10MB; bogus framing tears down the process via `stop()`.
+Lightweight stdio JSON-RPC client. MCP stdio framing is **newline-delimited JSON** (one message per line) — NOT LSP-style `Content-Length` framing. JSON.stringify never emits raw newlines, so a single trailing `\n` is sufficient on the wire. Buffer is binary so `\n` indexing is byte-correct under multi-byte UTF-8.
+
+The Context7 server's tool surface evolved since the original integration: `resolve-library-id` requires both `libraryName` (matching) and `query` (ranking); the docs tool was renamed `query-docs` (was `get-library-docs`) and takes `libraryId` + `query`. `resolveLibrary` therefore takes a query parameter so the topic flows through to ranking.
+
+Process event handlers (`data`, `error`, `exit`) are identity-guarded against the spawned `ChildProcess`: a late event from a previously-killed process must be a no-op for the new one. Per-line cap is 10MB — a server that streams gigabytes without ever emitting a newline triggers `stop()`. Tool calls that return `isError: true` throw rather than silently treating the error message as data.
 
 ### Summarizer (`src/web/summarizer.ts`)
 Content ≤ 30K chars passes through; larger content goes through a single-turn `createAgentSession` with `tools: []` and an empty system prompt. Check `signal?.aborted` both before AND after `createAgentSession` resolves (`EventTarget` does not replay past abort events). The abort handler must wrap `session.abort()` in `.catch(() => {})` because Node's default `--unhandled-rejections=throw` turns a fire-and-forget rejection into a process crash.

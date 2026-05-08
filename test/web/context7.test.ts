@@ -25,10 +25,9 @@ function createMockProcess() {
 	return proc;
 }
 
-/** Build a Content-Length framed JSON-RPC response. */
+/** Build a newline-delimited JSON-RPC message (MCP stdio framing). */
 function frameMessage(obj: unknown): string {
-	const body = JSON.stringify(obj);
-	return `Content-Length: ${Buffer.byteLength(body, "utf-8")}\r\n\r\n${body}`;
+	return `${JSON.stringify(obj)}\n`;
 }
 
 /** Wait until the mock has been called at least `n` times. */
@@ -64,7 +63,7 @@ describe("Context7Client", () => {
 		expect(written).toContain('"method":"initialize"');
 
 		// Simulate server response with the initialize result
-		const initRequest = JSON.parse(written.split("\r\n\r\n")[1]);
+		const initRequest = JSON.parse(written);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(
@@ -99,7 +98,7 @@ describe("Context7Client", () => {
 
 		// Complete init handshake
 		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
-		const initReq = JSON.parse(initWritten.split("\r\n\r\n")[1]);
+		const initReq = JSON.parse(initWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(
@@ -116,7 +115,7 @@ describe("Context7Client", () => {
 		// Wait for the tool call write to appear
 		await waitForWrite(proc.stdin.write, 3);
 		const toolWritten = proc.stdin.write.mock.calls[2][0] as string;
-		const toolReq = JSON.parse(toolWritten.split("\r\n\r\n")[1]);
+		const toolReq = JSON.parse(toolWritten);
 		expect(toolReq.method).toBe("tools/call");
 		expect(toolReq.params.name).toBe("resolve-library-id");
 
@@ -158,7 +157,7 @@ describe("Context7Client", () => {
 
 		// Complete init
 		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
-		const initReq = JSON.parse(initWritten.split("\r\n\r\n")[1]);
+		const initReq = JSON.parse(initWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(frameMessage({ jsonrpc: "2.0", id: initReq.id, result: {} })),
@@ -186,20 +185,21 @@ describe("Context7Client", () => {
 
 		// Complete init
 		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
-		const initReq = JSON.parse(initWritten.split("\r\n\r\n")[1]);
+		const initReq = JSON.parse(initWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(frameMessage({ jsonrpc: "2.0", id: initReq.id, result: {} })),
 		);
 		await startPromise;
 
-		// Call resolveLibrary
-		const resolvePromise = client.resolveLibrary("express");
+		// Call resolveLibrary. The new signature requires both `name` and a
+		// `query` topic so the server can rank by relevance.
+		const resolvePromise = client.resolveLibrary("express", "middleware");
 
 		// Wait for the tool call write, then respond
 		await waitForWrite(proc.stdin.write, 3);
 		const toolWritten = proc.stdin.write.mock.calls[2][0] as string;
-		const toolReq = JSON.parse(toolWritten.split("\r\n\r\n")[1]);
+		const toolReq = JSON.parse(toolWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(
@@ -234,19 +234,19 @@ describe("Context7Client", () => {
 		// Complete init
 		await waitForWrite(proc.stdin.write, 1);
 		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
-		const initReq = JSON.parse(initWritten.split("\r\n\r\n")[1]);
+		const initReq = JSON.parse(initWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(frameMessage({ jsonrpc: "2.0", id: initReq.id, result: {} })),
 		);
 		await startPromise;
 
-		const resolvePromise = client.resolveLibrary("nonexistent-lib");
+		const resolvePromise = client.resolveLibrary("nonexistent-lib", "any");
 
 		// Wait for the tool call write to appear (after init + notification)
 		await waitForWrite(proc.stdin.write, 3);
 		const toolWritten = proc.stdin.write.mock.calls[2][0] as string;
-		const toolReq = JSON.parse(toolWritten.split("\r\n\r\n")[1]);
+		const toolReq = JSON.parse(toolWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(
@@ -295,7 +295,7 @@ describe("Context7Client", () => {
 
 		// Complete init
 		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
-		const initReq = JSON.parse(initWritten.split("\r\n\r\n")[1]);
+		const initReq = JSON.parse(initWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(frameMessage({ jsonrpc: "2.0", id: initReq.id, result: {} })),
@@ -307,7 +307,7 @@ describe("Context7Client", () => {
 
 		await waitForWrite(proc.stdin.write, 3);
 		const toolWritten = proc.stdin.write.mock.calls[2][0] as string;
-		const toolReq = JSON.parse(toolWritten.split("\r\n\r\n")[1]);
+		const toolReq = JSON.parse(toolWritten);
 
 		// Send error response
 		proc.stdout.emit(
@@ -334,7 +334,7 @@ describe("Context7Client", () => {
 
 		// Send the init response split across two chunks
 		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
-		const initReq = JSON.parse(initWritten.split("\r\n\r\n")[1]);
+		const initReq = JSON.parse(initWritten);
 		const fullMsg = frameMessage({ jsonrpc: "2.0", id: initReq.id, result: {} });
 		const midpoint = Math.floor(fullMsg.length / 2);
 
@@ -354,7 +354,7 @@ describe("Context7Client", () => {
 
 		// Complete init handshake
 		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
-		const initReq = JSON.parse(initWritten.split("\r\n\r\n")[1]);
+		const initReq = JSON.parse(initWritten);
 		proc.stdout.emit(
 			"data",
 			Buffer.from(frameMessage({ jsonrpc: "2.0", id: initReq.id, result: {} })),
@@ -366,8 +366,8 @@ describe("Context7Client", () => {
 		const call2 = client.callTool("tool-b", {});
 
 		await waitForWrite(proc.stdin.write, 4); // init + notification + 2 tool calls
-		const req1 = JSON.parse((proc.stdin.write.mock.calls[2][0] as string).split("\r\n\r\n")[1]);
-		const req2 = JSON.parse((proc.stdin.write.mock.calls[3][0] as string).split("\r\n\r\n")[1]);
+		const req1 = JSON.parse((proc.stdin.write.mock.calls[2][0] as string));
+		const req2 = JSON.parse((proc.stdin.write.mock.calls[3][0] as string));
 
 		// Send both responses in a single chunk
 		const msg1 = frameMessage({ jsonrpc: "2.0", id: req1.id, result: { data: "a" } });
@@ -392,7 +392,7 @@ describe("Context7Client", () => {
 		const client = new Context7Client();
 		const start1 = client.start();
 		const initReq1 = JSON.parse(
-			(proc1.stdin.write.mock.calls[0][0] as string).split("\r\n\r\n")[1],
+			(proc1.stdin.write.mock.calls[0][0] as string),
 		);
 		proc1.stdout.emit(
 			"data",
@@ -406,7 +406,7 @@ describe("Context7Client", () => {
 		client.stop();
 		const start2 = client.start();
 		const initReq2 = JSON.parse(
-			(proc2.stdin.write.mock.calls[0][0] as string).split("\r\n\r\n")[1],
+			(proc2.stdin.write.mock.calls[0][0] as string),
 		);
 		proc2.stdout.emit(
 			"data",
@@ -424,7 +424,7 @@ describe("Context7Client", () => {
 		proc1.emit("exit", 137);
 
 		const toolReq = JSON.parse(
-			(proc2.stdin.write.mock.calls[2][0] as string).split("\r\n\r\n")[1],
+			(proc2.stdin.write.mock.calls[2][0] as string),
 		);
 		proc2.stdout.emit(
 			"data",
@@ -437,16 +437,17 @@ describe("Context7Client", () => {
 		client.stop();
 	});
 
-	it("tears down the process when an oversized Content-Length frame arrives", async () => {
-		// Regression: a compromised MCP server sending a 2GB Content-Length must
-		// not cause unbounded buffering. Frame is rejected and the process killed.
+	it("tears down the process when an oversized line arrives without a newline", async () => {
+		// Regression: a compromised MCP server streaming gigabytes without ever
+		// emitting a newline must not drive the parse buffer to OOM. The cap is
+		// enforced on the unframed buffer and triggers stop() once exceeded.
 		const proc = createMockProcess();
 		mockSpawn.mockReturnValueOnce(proc as any);
 
 		const client = new Context7Client();
 		const startPromise = client.start();
 		const initReq = JSON.parse(
-			(proc.stdin.write.mock.calls[0][0] as string).split("\r\n\r\n")[1],
+			(proc.stdin.write.mock.calls[0][0] as string),
 		);
 		proc.stdout.emit(
 			"data",
@@ -459,15 +460,17 @@ describe("Context7Client", () => {
 		const pending = client.callTool("any", {});
 		await waitForWrite(proc.stdin.write, 3);
 
-		// Send a header advertising a wildly oversized body. The body itself is
-		// never produced — the client should reject on the header alone.
-		proc.stdout.emit(
-			"data",
-			Buffer.from(`Content-Length: 2147483647\r\n\r\n`),
-		);
+		// Stream 11 MB without a newline — exceeds MAX_FRAME_BYTES (10 MB).
+		const CHUNK = 1024 * 1024;
+		for (let i = 0; i < 11; i++) {
+			proc.stdout.emit(
+				"data",
+				Buffer.alloc(CHUNK, 0x78), // 'x' bytes, no newline
+			);
+			if (proc.kill.mock.calls.length > 0) break;
+		}
 
 		expect(proc.kill).toHaveBeenCalled();
-		// Pending request is rejected via the stop() path.
 		await expect(pending).rejects.toThrow(/stopped/);
 	});
 });
