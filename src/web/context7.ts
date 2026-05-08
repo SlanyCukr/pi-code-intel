@@ -49,7 +49,9 @@ interface PendingRequest {
  * Lightweight MCP stdio client for Context7.
  *
  * Spawns `npx -y @upstash/context7-mcp` and communicates via JSON-RPC
- * over stdin/stdout with Content-Length framing (same protocol as LSP).
+ * over stdin/stdout. MCP framing is newline-delimited JSON (one message
+ * per line) — NOT LSP-style `Content-Length`. See `processBuffer` for
+ * the framing details.
  *
  * Server-initiated notifications (messages without an `id`) are ignored —
  * this client only uses request/response pairs.
