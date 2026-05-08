@@ -18,6 +18,19 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+      # rtk (Rust Token Killer) is a runtime dependency of pi-code-intel:
+      # the spawn hook rewrites bash commands through `rtk rewrite` to
+      # produce token-optimized output. The rtk.test.ts suite exercises
+      # this against the real binary. Pinned version protects against
+      # upstream drift; the hook contract is stable but output formats
+      # could change.
+      - name: Install rtk
+        env:
+          RTK_VERSION: v0.39.0
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - run: rtk --version
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
@@ -36,6 +49,11 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+      # The analyzer doesn't directly use rtk, but the package's tests
+      # do as a runtime sanity. The test:foreign script doesn't run
+      # vitest; it runs the analyzer end-to-end. So rtk isn't strictly
+      # needed here, but installing it costs <5s and keeps the
+      # environment consistent across jobs.
       - run: npm ci
       - run: npm run test:foreign
 
