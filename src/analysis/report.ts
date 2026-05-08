@@ -19,8 +19,13 @@ export interface RenderInput {
 	hitsBySession: Map<string, AntiPatternHit[]>;
 	/** Section 4 — keyed by sessionId. Optional: omitted when phase 5 is disabled. */
 	outcomesBySession?: Map<string, OutcomeData>;
-	/** Section 5 — phase 6 will populate this. */
-	proposals?: never;
+	/**
+	 * Section 5 — a complete markdown block produced by
+	 * `generateProposals`. When undefined the section renders the
+	 * standard "propose mode not requested" placeholder; when present
+	 * the renderer drops it under the `## 5.` heading verbatim.
+	 */
+	proposalsMarkdown?: string;
 }
 
 /**
@@ -41,7 +46,7 @@ export function renderMarkdown(input: RenderInput): string {
 	out.push(renderEfficiency(input));
 	out.push(renderAntiPatterns(input));
 	out.push(renderOutcomes(input));
-	out.push(renderProposals());
+	out.push(renderProposals(input));
 	return out.join("\n");
 }
 
@@ -234,13 +239,18 @@ function renderOutcomes(input: RenderInput): string {
 	return lines.join("\n");
 }
 
-function renderProposals(): string {
-	return [
-		"## 5. Propose",
-		"",
-		"(not requested — pass `--propose` to enable; phase 6)",
-		"",
-	].join("\n");
+function renderProposals(input: RenderInput): string {
+	const lines: string[] = [];
+	lines.push("## 5. Propose");
+	lines.push("");
+	if (typeof input.proposalsMarkdown !== "string") {
+		lines.push("(not requested \u2014 pass `--propose` to enable)");
+		lines.push("");
+		return lines.join("\n");
+	}
+	lines.push(input.proposalsMarkdown);
+	if (!input.proposalsMarkdown.endsWith("\n")) lines.push("");
+	return lines.join("\n");
 }
 
 /**

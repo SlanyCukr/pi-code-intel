@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { aggregateMetrics, extractMetrics } from "./metrics.js";
 import { correlateOutcomes, type OutcomeData } from "./outcomes.js";
 import { runAllRules } from "./patterns/index.js";
+import { generateProposals } from "./propose.js";
 import { readSession } from "./reader.js";
 import { renderMarkdown } from "./report.js";
 import type { AntiPatternHit, ParsedSession } from "./types.js";
@@ -56,10 +57,15 @@ export interface AnalysisResult {
  *     the run — one corrupted session shouldn't kill the report.
  *  4. Compute per-session metrics + run all anti-pattern rules.
  *  5. Aggregate metrics across sessions.
- *  6. Render markdown.
- *  7. Write to disk (unless `noWrite`); always return the markdown.
+ *  6. (Optional) Generate LLM-driven prompt amendment proposals.
+ *  7. Render markdown.
+ *  8. Write to disk (unless `noWrite`); always return the markdown.
+ *
+ * Step 6 is async (LLM call) — that's why this function is now async.
+ * The propose step only runs when `args.propose === true`; otherwise
+ * the function is effectively still synchronous.
  */
-export function runAnalysis(args: AnalysisArgs): AnalysisResult {
+export async function runAnalysis(args: AnalysisArgs): Promise<AnalysisResult> {
 	const sessionsDir = resolveSessionsDir(args.cwd);
 	const candidates = listSessionFiles(sessionsDir, args);
 	const parsed: ParsedSession[] = [];
@@ -98,12 +104,29 @@ export function runAnalysis(args: AnalysisArgs): AnalysisResult {
 		parsed.map((p) => p.events),
 	);
 
+	let proposalsMarkdown: string | undefined;
+	if (args.propose) {
+		proposalsMarkdown = await generateProposals(
+			{
+				aggregated,
+				sessionMetrics: perSession,
+				hitsBySession,
+				parsedSessions: parsed,
+				systemPromptSourcePath: join(args.cwd, "src", "prompt", "system-prompt.ts"),
+			},
+			{
+				cwd: args.cwd,
+			},
+		);
+	}
+
 	const reportMarkdown = renderMarkdown({
 		generatedAt: new Date(),
 		sessionMetrics: perSession,
 		aggregated,
 		hitsBySession,
 		outcomesBySession,
+		proposalsMarkdown,
 	});
 
 	let outPath: string | null = null;

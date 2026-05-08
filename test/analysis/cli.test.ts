@@ -143,7 +143,7 @@ describe("runAnalysis", () => {
 		return path;
 	}
 
-	it("writes the report to <cwd>/.pi/analyses/ by default", () => {
+	it("writes the report to <cwd>/.pi/analyses/ by default", async () => {
 		// Mock $HOME so resolveSessionsDir picks up the temp tree.
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;
@@ -173,7 +173,7 @@ describe("runAnalysis", () => {
 				],
 			);
 
-			const result = runAnalysis({ cwd: fakeCwd });
+			const result = await runAnalysis({ cwd: fakeCwd });
 			expect(result.outPath).not.toBeNull();
 			expect(result.outPath!.startsWith(fakeCwd)).toBe(true);
 			expect(result.outPath!).toMatch(/\.pi\/analyses\//);
@@ -185,7 +185,7 @@ describe("runAnalysis", () => {
 		}
 	});
 
-	it("respects --no-write (does not write to disk; outPath is null)", () => {
+	it("respects --no-write (does not write to disk; outPath is null)", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;
 		try {
@@ -197,7 +197,7 @@ describe("runAnalysis", () => {
 				{ type: "session", version: 3, id: "u", timestamp: "t", cwd: fakeCwd },
 				[],
 			);
-			const result = runAnalysis({ cwd: fakeCwd, noWrite: true });
+			const result = await runAnalysis({ cwd: fakeCwd, noWrite: true });
 			expect(result.outPath).toBeNull();
 			expect(result.reportMarkdown).toContain("# Pi session analysis");
 		} finally {
@@ -206,7 +206,7 @@ describe("runAnalysis", () => {
 		}
 	});
 
-	it("filters sessions by --since (mtime cutoff)", () => {
+	it("filters sessions by --since (mtime cutoff)", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;
 		try {
@@ -229,7 +229,7 @@ describe("runAnalysis", () => {
 			const longAgo = Date.now() - 30 * 86_400_000;
 			require("node:fs").utimesSync(oldFile, longAgo / 1000, longAgo / 1000);
 
-			const result = runAnalysis({
+			const result = await runAnalysis({
 				cwd: fakeCwd,
 				sinceMs: 7 * 86_400_000, // 7d
 				noWrite: true,
@@ -241,7 +241,7 @@ describe("runAnalysis", () => {
 		}
 	});
 
-	it("filters sessions by --session (UUID-prefix substring match)", () => {
+	it("filters sessions by --session (UUID-prefix substring match)", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;
 		try {
@@ -261,7 +261,7 @@ describe("runAnalysis", () => {
 				[],
 			);
 
-			const result = runAnalysis({
+			const result = await runAnalysis({
 				cwd: fakeCwd,
 				sessionId: "aaaaaaaa",
 				noWrite: true,
@@ -274,13 +274,13 @@ describe("runAnalysis", () => {
 		}
 	});
 
-	it("returns an empty-analysis report when the sessions directory does not exist", () => {
+	it("returns an empty-analysis report when the sessions directory does not exist", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;
 		try {
 			const noSessionsCwd = join(tmp, "never-used");
 			mkdirSync(noSessionsCwd, { recursive: true });
-			const result = runAnalysis({ cwd: noSessionsCwd, noWrite: true });
+			const result = await runAnalysis({ cwd: noSessionsCwd, noWrite: true });
 			expect(result.sessionFilesAnalyzed).toEqual([]);
 			expect(result.reportMarkdown).toContain("(no sessions analyzed)");
 		} finally {
@@ -289,7 +289,7 @@ describe("runAnalysis", () => {
 		}
 	});
 
-	it("skips files that fail to parse and reports them in sessionFilesSkipped", () => {
+	it("skips files that fail to parse and reports them in sessionFilesSkipped", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;
 		try {
@@ -310,7 +310,7 @@ describe("runAnalysis", () => {
 				"utf-8",
 			);
 
-			const result = runAnalysis({ cwd: fakeCwd, noWrite: true });
+			const result = await runAnalysis({ cwd: fakeCwd, noWrite: true });
 			expect(result.sessionFilesAnalyzed).toHaveLength(1);
 			expect(result.sessionFilesSkipped).toHaveLength(1);
 			expect(result.sessionFilesSkipped[0]).toContain("bad.jsonl");

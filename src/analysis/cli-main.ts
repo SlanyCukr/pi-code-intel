@@ -16,7 +16,7 @@
 import { parseArgs } from "node:util";
 import { runAnalysis, parseDuration } from "./cli.js";
 
-function main(argv: string[]): number {
+async function main(argv: string[]): Promise<number> {
 	let parsed: ReturnType<typeof parseArgs>;
 	try {
 		parsed = parseArgs({
@@ -59,7 +59,7 @@ function main(argv: string[]): number {
 		sinceMs = ms;
 	}
 
-	const result = runAnalysis({
+	const result = await runAnalysis({
 		cwd: typeof values.cwd === "string" ? values.cwd : process.cwd(),
 		sinceMs,
 		sessionId: typeof values.session === "string" ? values.session : undefined,
@@ -99,10 +99,20 @@ Options:
                         <cwd>/.pi/analyses/<YYYY-MM-DD>_<HHMMSS>.md
   --no-write            Print to stdout only; do not write to disk.
   --propose             Append section 5 with LLM-proposed prompt
-                        amendments. (Phase 6 — not yet implemented.)
+                        amendments. Makes a real model call — the
+                        model is selected from your pi settings or
+                        the first available model with credentials.
   -h, --help            Print this help.
 `);
 }
 
-const exitCode = main(process.argv.slice(2));
-process.exit(exitCode);
+main(process.argv.slice(2)).then(
+	(exitCode) => process.exit(exitCode),
+	(err) => {
+		console.error(
+			`[analyze-sessions] fatal: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		if (err instanceof Error && err.stack) console.error(err.stack);
+		process.exit(1);
+	},
+);
