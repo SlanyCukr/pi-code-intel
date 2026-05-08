@@ -324,7 +324,9 @@ export class LspClientManager {
 		// Start reading responses
 		this.startMessageReader(client);
 
-		// Handle process exit
+		// Identity guard on the map deletion: when init fails we kill the child,
+		// but `exit` fires asynchronously — a retry may have already registered a
+		// new client under the same name. Don't erase it.
 		child.on("exit", (code) => {
 			// Reject all pending requests
 			for (const [, req] of client.pendingRequests) {
@@ -336,7 +338,9 @@ export class LspClientManager {
 				);
 			}
 			client.pendingRequests.clear();
-			this.clients.delete(serverName);
+			if (this.clients.get(serverName) === client) {
+				this.clients.delete(serverName);
+			}
 		});
 
 		child.on("error", (err) => {
@@ -345,7 +349,9 @@ export class LspClientManager {
 				req.reject(err);
 			}
 			client.pendingRequests.clear();
-			this.clients.delete(serverName);
+			if (this.clients.get(serverName) === client) {
+				this.clients.delete(serverName);
+			}
 		});
 
 		// Send initialize request — kill child if init fails

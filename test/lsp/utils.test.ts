@@ -22,10 +22,34 @@ describe("fileToUri", () => {
 		expect(fileToUri("/home/user/file.ts")).toBe("file:///home/user/file.ts");
 	});
 
-	it("converts path with spaces", () => {
+	it("percent-encodes spaces (RFC 3986)", () => {
 		expect(fileToUri("/home/user/my project/file.ts")).toBe(
-			"file:///home/user/my project/file.ts",
+			"file:///home/user/my%20project/file.ts",
 		);
+	});
+
+	it("percent-encodes special characters (#, %, ?)", () => {
+		// `#` and `?` would otherwise be parsed as fragment/query delimiters;
+		// `%` itself must be encoded as `%25` to round-trip.
+		expect(fileToUri("/home/user/100%.txt")).toBe(
+			"file:///home/user/100%25.txt",
+		);
+		expect(fileToUri("/tmp/a#b?c.txt")).toBe(
+			"file:///tmp/a%23b%3Fc.txt",
+		);
+	});
+
+	it("round-trips through uriToFile for tricky paths", () => {
+		const paths = [
+			"/home/user/file.ts",
+			"/home/user/my project/file.ts",
+			"/home/user/100%.txt",
+			"/tmp/a#b?c.txt",
+			"/tmp/caf\u00e9/file.ts",
+		];
+		for (const p of paths) {
+			expect(uriToFile(fileToUri(p))).toBe(p);
+		}
 	});
 });
 
@@ -66,6 +90,16 @@ describe("getLanguageId", () => {
 
 	it("returns null for unknown extensions", () => {
 		expect(getLanguageId("file.xyz")).toBeNull();
+	});
+
+	it("returns null for extensionless filenames", () => {
+		// Regression: prior implementation used `slice(lastIndexOf("."))`,
+		// which for "Makefile" returned the single-char string "e" — a bogus
+		// extension that could spuriously match a server config. extname()
+		// returns "" for filenames with no dot, so getLanguageId must yield
+		// null here.
+		expect(getLanguageId("Makefile")).toBeNull();
+		expect(getLanguageId("/etc/passwd")).toBeNull();
 	});
 
 	it("handles full paths", () => {
@@ -335,6 +369,43 @@ describe("formatHover", () => {
 
 	it("returns message for empty content", () => {
 		expect(formatHover({ contents: "" })).toBe(
+			"No hover information available.",
+		);
+	});
+
+	it("handles MarkedString[] with plain strings", () => {
+		expect(
+			formatHover({ contents: ["first line", "second line"] }),
+		).toBe("first line\n\nsecond line");
+	});
+
+	it("handles single MarkedString object (not in array)", () => {
+		// Regression: `{ language, value }` and `MarkupContent` both have
+		// `.value`; a single MarkedString must be rendered as a code block,
+		// not silently treated as MarkupContent.
+		expect(
+			formatHover({ contents: { language: "go", value: "func Bar()" } }),
+		).toBe("```go\nfunc Bar()\n```");
+	});
+
+	it("handles MarkedString[] with code-block objects", () => {
+		expect(
+			formatHover({
+				contents: [
+					{ language: "rust", value: "fn foo() -> u32" },
+					"primary docs paragraph",
+				],
+			}),
+		).toBe(
+			"```rust\nfn foo() -> u32\n```\n\nprimary docs paragraph",
+		);
+	});
+
+	it("returns fallback for empty MarkedString[]", () => {
+		expect(formatHover({ contents: [] })).toBe(
+			"No hover information available.",
+		);
+		expect(formatHover({ contents: ["", ""] })).toBe(
 			"No hover information available.",
 		);
 	});

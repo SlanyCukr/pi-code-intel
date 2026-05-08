@@ -41,6 +41,26 @@ Code intelligence via language servers. Supports 34 languages out of the box.
 
 Language servers are auto-discovered. The tool checks `node_modules/.bin/`, `.venv/bin/`, and system PATH.
 
+### `fetch` — Web fetch
+
+Fetch a URL and convert it to markdown for the agent to read. HTML is converted via Turndown (with `script`/`style`/`nav`/`footer`/`header`/`aside`/`iframe`/`noscript` stripped); JSON is pretty-printed; plain text is returned as-is. Large content (> 30K chars) is summarized via a single-turn no-tools agent session focused on the user's prompt.
+
+**Parameters:** `url`, `prompt` (what to extract from the page).
+
+**Hardening:**
+- SSRF guard rejects loopback, RFC 1918, link-local (incl. cloud-metadata `169.254.169.254`), and IPv6 unique-local addresses, including hostnames that DNS-resolve into those ranges.
+- Redirects are followed manually (`redirect: "manual"`) with the SSRF guard re-run on every hop, capped at 10 redirects.
+- Response body is streamed with a 10MB cap enforced per-chunk; oversized bodies abort mid-stream.
+- 15-second fetch timeout, 15-minute / 50-entry cache (FIFO eviction).
+
+### `context7` — Library documentation lookup
+
+Look up version-specific library documentation via the [Context7](https://github.com/upstash/context7-mcp) MCP server. Resolves a library/package name (e.g. `express`, `react`, `vitest`) to a Context7-compatible ID, then queries that library's docs for a specific topic.
+
+**Parameters:** `library`, `topic`.
+
+The MCP server is spawned lazily as `npx -y @upstash/context7-mcp` on first call and reused for the lifetime of the session. Internal request frames are capped at 10MB to bound the blast radius of a compromised package.
+
 ### `agent` — Sub-agents
 
 Delegate tasks to specialized agents that run independently and return results.
@@ -61,6 +81,10 @@ Delegate tasks to specialized agents that run independently and return results.
 | `pr-review-toolkit:intent-reviewer` | opus | Validate code changes against intent documents |
 
 Sub-agents run in-process via `createAgentSession`. Sessions persist to disk under `subagents/` when a parent session dir is available. "inherit" agents use the parent's current model.
+
+Sub-agents have a default 15-minute timeout (raised from an earlier 5min that empirically killed productive review-heavy runs). The caller LLM can override per-invocation via the optional `timeoutMs` parameter, bounded `[30000, 1800000]` (30s–30min). When a timeout fires, any partial output is still returned alongside a `timedOut` error.
+
+Sub-agent templates declare a `tools` allowlist in their frontmatter. The parent's `lsp`, `fetch`, and `context7` tools are made available to any sub-agent whose template explicitly lists them; tools not listed are filtered out.
 
 ## Code Intelligence Workflow
 
@@ -84,15 +108,11 @@ Create `.pi/code-intel.json` in your project root (or `~/.pi/agent/code-intel.js
 
 ```json
 {
-  "lsp": {
-    "enabled": true
-  },
-  "agents": {
-    "enabled": true
-  },
-  "prompt": {
-    "enabled": true
-  }
+  "lsp": { "enabled": true },
+  "agents": { "enabled": true },
+  "prompt": { "enabled": true },
+  "web": { "enabled": true },
+  "context7": { "enabled": true }
 }
 ```
 
@@ -131,6 +151,7 @@ npm run dev       # Watch mode
 src/
 ├── extension.ts          # Entry point — registers all tools and hooks
 ├── config.ts             # Project config loading (.pi/code-intel.json)
+├── types.ts              # Shared `AnyModel = Model<any>` alias
 ├── lsp/
 │   ├── client.ts         # LSP client manager (JSON-RPC over stdio)
 │   ├── config.ts         # Server auto-discovery and config merging
@@ -138,8 +159,14 @@ src/
 │   ├── tool.ts           # LSP tool definition
 │   ├── types.ts          # LSP protocol types
 │   └── utils.ts          # Formatters for locations, diagnostics, symbols
+├── web/
+│   ├── fetch.ts          # SSRF guard, redirect loop, cache, HTML→markdown
+│   ├── tool.ts           # `fetch` tool definition
+│   ├── summarizer.ts     # Single-turn no-tools agent session for large content
+│   └── context7.ts       # Context7 MCP stdio client + `context7` tool
 ├── agents/
-│   ├── runner.ts         # Template loading, sub-agent execution via SDK
+│   ├── runner.ts         # Sub-agent execution + timeout + progress streaming
+│   ├── templates.ts      # Template parsing and registry
 │   ├── tool.ts           # Agent tool definition
 │   └── templates/        # Agent markdown templates
 └── prompt/

@@ -135,6 +135,12 @@ function createSessionStorage(cwd: string, parentSessionDir?: string): SessionMa
 	return SessionManager.inMemory(cwd);
 }
 
+// 15 minutes. Empirically, review-heavy sub-agents (intent-reviewer,
+// code-reviewer) routinely need 6–10 minutes for non-trivial tasks; the prior
+// 5-minute cap killed productive runs mid-flight. Callers can override per
+// invocation via the `timeout` option, or disable entirely with `timeout: 0`.
+const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+
 interface RunSubAgentOptions {
 	template: AgentTemplate;
 	task: string;
@@ -144,6 +150,8 @@ interface RunSubAgentOptions {
 	signal?: AbortSignal;
 	onProgress?: (status: string) => void;
 	parentSessionDir?: string;
+	/** Timeout in milliseconds. Defaults to 5 minutes. Set to 0 to disable. */
+	timeout?: number;
 }
 
 /**
@@ -154,7 +162,7 @@ interface RunSubAgentOptions {
  * and disposes the session.
  */
 export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgentResult> {
-	const { template, task, cwd, parentModel, customTools, signal, onProgress, parentSessionDir } = options;
+	const { template, task, cwd, parentModel, customTools, signal, onProgress, parentSessionDir, timeout } = options;
 	// Resolve model: "inherit" uses parent model, otherwise undefined (let SDK resolve)
 	const model: AnyModel | undefined =
 		template.model === "inherit" ? parentModel : undefined;
@@ -162,7 +170,7 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
 	// Declare outside try so cleanup is accessible from catch/finally
 	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | null = null;
 	let unsub: (() => void) | null = null;
-	let abortHandler: (() => void) | null = null;
+	let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
 	subAgentDepth++;
 	try {
@@ -184,10 +192,10 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
 		session.setActiveToolsByName(template.tools);
 		session.agent.setSystemPrompt(buildSubAgentSystemPrompt(template, filteredCustomTools));
 
-		// Stream progress via session events
+		// Stream progress via session events — tool usage + partial assistant text
 		let toolCount = 0;
 		let currentTool = "";
-		unsub = session.subscribe((event: { type: string; toolName?: string; toolCallId?: string }) => {
+		unsub = session.subscribe((event: { type: string; toolName?: string; toolCallId?: string; text?: string }) => {
 			if (!onProgress) return;
 			if (event.type === "tool_execution_start") {
 				toolCount++;
@@ -195,13 +203,30 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
 				onProgress(`tool ${toolCount}: ${currentTool}`);
 			} else if (event.type === "tool_execution_end") {
 				onProgress(`tool ${toolCount}: ${currentTool} done`);
+			} else if (event.type === "message_update" && event.text) {
+				// Show first ~120 chars of the latest assistant text as a progress hint
+				const preview = event.text.length > 120
+					? `${event.text.slice(0, 120)}…`
+					: event.text;
+				onProgress(`finding: ${preview}`);
 			}
 		});
 
-		// Abort if signal fires
+		// Abort if signal fires. `{ once: true }` auto-removes the listener after
+		// firing; nothing to clean up in `finally`.
 		if (signal) {
-			abortHandler = () => session?.abort();
-			signal.addEventListener("abort", abortHandler, { once: true });
+			signal.addEventListener("abort", () => session?.abort(), { once: true });
+		}
+
+		// Timeout — abort the session if it runs too long
+		let timedOut = false;
+		const timeoutMs = timeout ?? DEFAULT_TIMEOUT_MS;
+		if (timeoutMs > 0) {
+			timeoutTimer = setTimeout(() => {
+				timedOut = true;
+				console.error(`[code-intel] Sub-agent ${template.name} timed out after ${timeoutMs}ms`);
+				session?.abort();
+			}, timeoutMs);
 		}
 
 		// Run the task
@@ -212,6 +237,13 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
 			session.messages as Array<{ role: string; content: unknown }>,
 		);
 
+		if (timedOut) {
+			return {
+				output: output || "",
+				error: `Sub-agent ${template.name} timed out after ${timeoutMs}ms. Output may be incomplete.`,
+			};
+		}
+
 		return {
 			output: output || "Sub-agent completed with no text output.",
 		};
@@ -220,10 +252,8 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
 		const message = err instanceof Error ? err.message : String(err);
 		return { output: "", error: `Sub-agent error: ${message}` };
 	} finally {
+		if (timeoutTimer) clearTimeout(timeoutTimer);
 		unsub?.();
-		if (signal && abortHandler) {
-			signal.removeEventListener("abort", abortHandler);
-		}
 		session?.dispose();
 		subAgentDepth--;
 	}

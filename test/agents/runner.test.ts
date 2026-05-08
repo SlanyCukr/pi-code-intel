@@ -1,6 +1,22 @@
-import { describe, it, expect } from "vitest";
-import { extractFinalReport, isInSubAgent } from "../../src/agents/runner.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { extractFinalReport, isInSubAgent, runSubAgent } from "../../src/agents/runner.js";
 import { loadTemplates, getTemplate, listTemplates, templateNeedsWriteTools } from "../../src/agents/templates.js";
+
+// Mock createAgentSession for runSubAgent tests
+vi.mock("@mariozechner/pi-coding-agent", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@mariozechner/pi-coding-agent")>();
+	return {
+		...actual,
+		createAgentSession: vi.fn(actual.createAgentSession),
+	};
+});
+
+import { createAgentSession } from "@mariozechner/pi-coding-agent";
+const mockCreateSession = vi.mocked(createAgentSession);
+
+beforeEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe("agent templates", () => {
 	it("loads templates from disk", () => {
@@ -172,5 +188,167 @@ describe("templateNeedsWriteTools", () => {
 describe("isInSubAgent", () => {
 	it("returns false at baseline", () => {
 		expect(isInSubAgent()).toBe(false);
+	});
+});
+
+describe("runSubAgent", () => {
+	const makeTemplate = (overrides?: Partial<Parameters<typeof runSubAgent>[0]["template"]>) => ({
+		name: "test-agent",
+		category: "test",
+		description: "test",
+		model: "inherit" as const,
+		thinkingLevel: "medium" as const,
+		tools: ["read", "bash"],
+		systemPrompt: "You are a test agent.",
+		...overrides,
+	});
+
+	function mockSession(opts: {
+		messages?: Array<{ role: string; content: unknown }>;
+		promptBehavior?: "resolve" | "hang" | "reject";
+		promptError?: Error;
+	} = {}) {
+		const subscribers: Array<(event: any) => void> = [];
+		// For "hang" behavior: prompt resolves when abort() is called
+		let resolveHang: (() => void) | null = null;
+		const session = {
+			agent: { setSystemPrompt: vi.fn() },
+			prompt: vi.fn(),
+			messages: opts.messages ?? [{ role: "assistant", content: "test output" }],
+			dispose: vi.fn(),
+			abort: vi.fn(() => { resolveHang?.(); }),
+			setActiveToolsByName: vi.fn(),
+			subscribe: vi.fn((cb: (event: any) => void) => {
+				subscribers.push(cb);
+				return () => { /* unsub */ };
+			}),
+		};
+
+		if (opts.promptBehavior === "hang") {
+			session.prompt.mockImplementation(() => new Promise<void>((resolve) => { resolveHang = resolve; }));
+		} else if (opts.promptBehavior === "reject") {
+			session.prompt.mockRejectedValue(opts.promptError ?? new Error("prompt failed"));
+		} else {
+			session.prompt.mockResolvedValue(undefined);
+		}
+
+		mockCreateSession.mockResolvedValue({
+			session: session as any,
+			extensionsResult: { extensions: [], errors: [], runtime: 0 as any },
+		});
+
+		return { session, subscribers, emit: (event: any) => subscribers.forEach(cb => cb(event)) };
+	}
+
+	it("returns timeout error when sub-agent exceeds timeout", async () => {
+		vi.useFakeTimers();
+		const { session } = mockSession({ promptBehavior: "hang" });
+
+		const resultPromise = runSubAgent({
+			template: makeTemplate(),
+			task: "do something slow",
+			cwd: "/tmp",
+			parentModel: undefined,
+			customTools: [],
+			timeout: 100,
+		});
+
+		// Advance past timeout
+		await vi.advanceTimersByTimeAsync(150);
+
+		const result = await resultPromise;
+
+		expect(result.error).toContain("timed out");
+		expect(result.error).toContain("100ms");
+		expect(session.abort).toHaveBeenCalled();
+		expect(session.dispose).toHaveBeenCalled();
+
+		vi.useRealTimers();
+	});
+
+	it("does not set timeout when timeout=0", async () => {
+		vi.useFakeTimers();
+		const { session } = mockSession();
+
+		const result = await runSubAgent({
+			template: makeTemplate(),
+			task: "quick task",
+			cwd: "/tmp",
+			parentModel: undefined,
+			customTools: [],
+			timeout: 0,
+		});
+
+		expect(result.output).toBe("test output");
+		expect(result.error).toBeUndefined();
+		expect(session.abort).not.toHaveBeenCalled();
+
+		vi.useRealTimers();
+	});
+
+	it("streams message_update progress with truncation", async () => {
+		const { session, emit } = mockSession();
+		const progress: string[] = [];
+
+		// Start the agent — prompt resolves synchronously after subscribers are set up
+		// We need to capture progress during execution, so mock prompt to emit events first
+		session.prompt.mockImplementation(async () => {
+			emit({ type: "message_update", text: "Short finding" });
+			emit({ type: "message_update", text: "A".repeat(200) });
+		});
+
+		await runSubAgent({
+			template: makeTemplate(),
+			task: "explore code",
+			cwd: "/tmp",
+			parentModel: undefined,
+			customTools: [],
+			onProgress: (s) => progress.push(s),
+		});
+
+		const messageUpdates = progress.filter(p => p.startsWith("finding:"));
+		expect(messageUpdates).toHaveLength(2);
+		expect(messageUpdates[0]).toBe("finding: Short finding");
+		// Second should be truncated to ~120 chars + ellipsis
+		expect(messageUpdates[1]).toContain("finding: ");
+		expect(messageUpdates[1].length).toBeLessThan(140);
+		expect(messageUpdates[1]).toContain("…");
+	});
+
+	it("streams tool_execution_start and tool_execution_end progress", async () => {
+		const { session, emit } = mockSession();
+		const progress: string[] = [];
+
+		session.prompt.mockImplementation(async () => {
+			emit({ type: "tool_execution_start", toolName: "read" });
+			emit({ type: "tool_execution_end", toolName: "read" });
+		});
+
+		await runSubAgent({
+			template: makeTemplate(),
+			task: "explore",
+			cwd: "/tmp",
+			parentModel: undefined,
+			customTools: [],
+			onProgress: (s) => progress.push(s),
+		});
+
+		expect(progress).toContain("tool 1: read");
+		expect(progress).toContain("tool 1: read done");
+	});
+
+	it("disposes session on error", async () => {
+		const { session } = mockSession({ promptBehavior: "reject", promptError: new Error("boom") });
+
+		const result = await runSubAgent({
+			template: makeTemplate(),
+			task: "crash",
+			cwd: "/tmp",
+			parentModel: undefined,
+			customTools: [],
+		});
+
+		expect(result.error).toContain("boom");
+		expect(session.dispose).toHaveBeenCalled();
 	});
 });

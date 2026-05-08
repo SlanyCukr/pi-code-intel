@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { relative } from "node:path";
+import { extname, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type {
 	CallHierarchyIncomingCall,
 	CallHierarchyOutgoingCall,
@@ -8,30 +9,23 @@ import type {
 	Hover,
 	Location,
 	LocationLink,
+	MarkedString,
 	Position,
 	SymbolInformation,
 } from "./types.js";
 import { DiagnosticSeverity, SymbolKind } from "./types.js";
 
-// URI <-> Path conversion
+// URI <-> Path conversion. Node's stdlib does the RFC 3986 work correctly
+// (percent-encoding spaces / `#` / `?` / `%` / non-ASCII, Windows drive
+// letters); the prior hand-rolled versions did not.
 
 export function fileToUri(filePath: string): string {
-	const normalized = filePath.replace(/\\/g, "/");
-	if (normalized.startsWith("/")) {
-		return `file://${normalized}`;
-	}
-	// Windows: C:\foo -> file:///C:/foo
-	return `file:///${normalized}`;
+	return pathToFileURL(filePath).href;
 }
 
 export function uriToFile(uri: string): string {
 	if (!uri.startsWith("file://")) return uri;
-	let path = uri.slice(7);
-	// file:///C:/foo -> C:/foo (Windows)
-	if (path.match(/^\/[a-zA-Z]:\//)) {
-		path = path.slice(1);
-	}
-	return decodeURIComponent(path);
+	return fileURLToPath(uri);
 }
 
 // Language ID detection
@@ -101,7 +95,8 @@ const EXTENSION_TO_LANGUAGE: Record<string, string> = {
 };
 
 export function getLanguageId(filePath: string): string | null {
-	const ext = filePath.slice(filePath.lastIndexOf("."));
+	const ext = extname(filePath);
+	if (!ext) return null;
 	return EXTENSION_TO_LANGUAGE[ext] ?? null;
 }
 
@@ -332,15 +327,34 @@ export function formatWorkspaceSymbols(
 		.join("\n");
 }
 
+function formatMarkedString(m: MarkedString): string {
+	if (typeof m === "string") return m;
+	// `{ language, value }` form — render as a fenced code block.
+	return `\`\`\`${m.language}\n${m.value}\n\`\`\``;
+}
+
 export function formatHover(hover: Hover | null): string {
-	if (!hover) return "No hover information available.";
+	const NONE = "No hover information available.";
+	if (!hover) return NONE;
 
 	if (typeof hover.contents === "string") {
-		return hover.contents || "No hover information available.";
+		return hover.contents || NONE;
 	}
 
-	const content = hover.contents.value;
-	return content || "No hover information available.";
+	if (Array.isArray(hover.contents)) {
+		const parts = hover.contents
+			.map(formatMarkedString)
+			.filter((s) => s.length > 0);
+		return parts.length > 0 ? parts.join("\n\n") : NONE;
+	}
+
+	// Discriminate single-object MarkedString (`{ language, value }`) from
+	// MarkupContent (`{ kind, value }`). Both have `.value` so a structural
+	// check on `language` is the cheapest disambiguation.
+	if ("language" in hover.contents) {
+		return formatMarkedString(hover.contents) || NONE;
+	}
+	return hover.contents.value || NONE;
 }
 
 export function formatCallHierarchyIncoming(

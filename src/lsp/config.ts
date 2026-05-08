@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServerConfig } from "./types.js";
 
@@ -71,7 +71,8 @@ export function getServersForFile(
 	config: LspConfiguration,
 	filePath: string,
 ): { name: string; config: ServerConfig }[] {
-	const ext = filePath.slice(filePath.lastIndexOf("."));
+	const ext = extname(filePath);
+	if (!ext) return [];
 	const matches: { name: string; config: ServerConfig; isLinter: boolean }[] =
 		[];
 
@@ -120,17 +121,31 @@ export function resolveCommand(
 
 /**
  * Check whether a command binary is available locally or on PATH.
+ *
  * Reuses resolveCommand for local paths; additionally checks system PATH.
+ * On Windows, probes each entry in PATHEXT (default `.COM;.EXE;.BAT;.CMD`)
+ * since the bare command name on disk usually has an extension.
  */
 function isCommandAvailable(serverConfig: ServerConfig, cwd: string): boolean {
 	const resolved = resolveCommand(serverConfig, cwd);
 	// resolveCommand returns a local path if found, otherwise the bare command name
 	if (resolved.command !== serverConfig.command) return true;
 
+	// Build candidate filenames. On Windows, also probe PATHEXT extensions.
+	const candidates = [serverConfig.command];
+	if (process.platform === "win32") {
+		const pathExt = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";");
+		for (const ext of pathExt) {
+			if (ext) candidates.push(serverConfig.command + ext);
+		}
+	}
+
 	// Check system PATH
 	const pathDirs = (process.env.PATH ?? "").split(delimiter);
 	for (const dir of pathDirs) {
-		if (existsSync(join(dir, serverConfig.command))) return true;
+		for (const candidate of candidates) {
+			if (existsSync(join(dir, candidate))) return true;
+		}
 	}
 	return false;
 }

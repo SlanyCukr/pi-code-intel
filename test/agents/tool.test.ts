@@ -220,6 +220,49 @@ describe("execute", () => {
 		);
 	});
 
+	it("forwards timeoutMs from input to runSubAgent", async () => {
+		const template = FAKE_TEMPLATES[0]!;
+		mockGetTemplate.mockReturnValue(template);
+		mockRunSubAgent.mockResolvedValue({ output: "ok" });
+
+		const tool = createAgentTool(undefined);
+
+		await tool.execute(
+			"id",
+			{
+				type: "feature-dev:code-explorer",
+				task: "hard task",
+				timeoutMs: 20 * 60 * 1000,
+			},
+			undefined,
+			undefined,
+			makeCtx(),
+		);
+
+		expect(mockRunSubAgent).toHaveBeenCalledWith(
+			expect.objectContaining({ timeout: 20 * 60 * 1000 }),
+		);
+	});
+
+	it("omits timeout when input does not specify timeoutMs (runner uses default)", async () => {
+		const template = FAKE_TEMPLATES[0]!;
+		mockGetTemplate.mockReturnValue(template);
+		mockRunSubAgent.mockResolvedValue({ output: "ok" });
+
+		const tool = createAgentTool(undefined);
+
+		await tool.execute(
+			"id",
+			{ type: "feature-dev:code-explorer", task: "easy task" },
+			undefined,
+			undefined,
+			makeCtx(),
+		);
+
+		const args = mockRunSubAgent.mock.calls[0]![0];
+		expect(args.timeout).toBeUndefined();
+	});
+
 	it("truncates long task previews to 120 characters", async () => {
 		const template = FAKE_TEMPLATES[0]!;
 		mockGetTemplate.mockReturnValue(template);

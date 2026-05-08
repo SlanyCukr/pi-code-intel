@@ -1,8 +1,23 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { collectSourceFiles } from "../../src/lsp/client.js";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+
+// Mock spawn before importing the module under test so the LSP client uses
+// fake processes we can drive deterministically.
+const spawnMock = vi.fn();
+vi.mock("node:child_process", async () => {
+	const actual = await vi.importActual<typeof import("node:child_process")>(
+		"node:child_process",
+	);
+	return { ...actual, spawn: (...args: unknown[]) => spawnMock(...args) };
+});
+
+const { LspClientManager, collectSourceFiles } = await import(
+	"../../src/lsp/client.js"
+);
 
 const TS_EXTS = new Set([".ts"]);
 
@@ -148,5 +163,143 @@ describe("collectSourceFiles", () => {
 		const files = collectSourceFiles(root, TS_EXTS);
 
 		expect(files).toHaveLength(0);
+	});
+});
+
+// -- Exit-handler race regression --
+//
+// Failure mode (pre-fix): when an LSP init fails and we SIGTERM the child,
+// its `exit` event fires asynchronously later. By that time a successful
+// retry may have registered a NEW client under the same server name. The
+// stale handler used to call `clients.delete(serverName)` unconditionally,
+// erasing the new client. The fix is an identity guard.
+
+interface FakeChild extends EventEmitter {
+	stdin: PassThrough;
+	stdout: PassThrough;
+	stderr: PassThrough;
+	kill: ReturnType<typeof vi.fn>;
+	pid: number;
+}
+
+function makeFakeChild(): FakeChild {
+	const child = new EventEmitter() as FakeChild;
+	child.stdin = new PassThrough();
+	child.stdout = new PassThrough();
+	child.stderr = new PassThrough();
+	child.kill = vi.fn();
+	child.pid = Math.floor(Math.random() * 100_000);
+	return child;
+}
+
+/** Wait for the next LSP `initialize` request written to stdin and return its id. */
+function nextInitializeId(stream: PassThrough): Promise<number> {
+	return new Promise((resolve, reject) => {
+		let buf = Buffer.alloc(0);
+		const timer = setTimeout(
+			() => reject(new Error("timed out waiting for initialize request")),
+			2000,
+		);
+		const handler = (chunk: Buffer) => {
+			buf = Buffer.concat([buf, chunk]);
+			const sep = buf.indexOf("\r\n\r\n");
+			if (sep === -1) return;
+			const header = buf.subarray(0, sep).toString("utf-8");
+			const lenMatch = header.match(/Content-Length:\s*(\d+)/i);
+			if (!lenMatch) return;
+			const len = Number.parseInt(lenMatch[1], 10);
+			if (buf.length < sep + 4 + len) return;
+			const body = buf.subarray(sep + 4, sep + 4 + len).toString("utf-8");
+			try {
+				const msg = JSON.parse(body);
+				if (msg.method === "initialize" && typeof msg.id === "number") {
+					clearTimeout(timer);
+					stream.off("data", handler);
+					resolve(msg.id);
+				}
+			} catch {
+				/* incomplete; wait for more */
+			}
+		};
+		stream.on("data", handler);
+	});
+}
+
+function writeLspMessage(stream: PassThrough, payload: unknown): void {
+	const body = JSON.stringify(payload);
+	const header = `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n`;
+	stream.write(header + body);
+}
+
+describe("LspClientManager exit-handler race", () => {
+	beforeEach(() => {
+		spawnMock.mockReset();
+	});
+
+	it("a failed child's late exit does not erase the successor client", async () => {
+		const serverConfig = {
+			command: "fake-lsp",
+			args: [],
+			rootMarkers: [],
+			fileTypes: [".ts"],
+		};
+		const config = { servers: { fake: serverConfig } };
+		// Unique cwd per test so getInstance does not return a singleton from
+		// another test run.
+		const cwd = `${tmpdir()}/lsp-race-test-${Date.now()}-${Math.random()}`;
+
+		const childA = makeFakeChild();
+		const childB = makeFakeChild();
+		spawnMock.mockReturnValueOnce(childA).mockReturnValueOnce(childB);
+
+		// biome-ignore lint/suspicious/noExplicitAny: test-only access to private state
+		const manager = LspClientManager.getInstance(config as any, cwd);
+
+		try {
+			// --- First attempt: init fails ---
+			const seenIdA = nextInitializeId(childA.stdin);
+			const attemptA = manager
+				// biome-ignore lint/suspicious/noExplicitAny: test-only
+				.getOrCreate("fake", serverConfig as any)
+				.catch((e: unknown) => e);
+			await seenIdA;
+			// Reject the initialize request by firing exit. The handler removes
+			// from clients (no-op since nothing was added) and rejects pendings.
+			childA.emit("exit", 1);
+			const errA = await attemptA;
+			expect(errA).toBeInstanceOf(Error);
+
+			// --- Second attempt: init succeeds ---
+			const seenIdB = nextInitializeId(childB.stdin);
+			const attemptB = manager.getOrCreate(
+				"fake",
+				// biome-ignore lint/suspicious/noExplicitAny: test-only
+				serverConfig as any,
+			);
+			const idB = await seenIdB;
+			writeLspMessage(childB.stdout, {
+				jsonrpc: "2.0",
+				id: idB,
+				result: { capabilities: {} },
+			});
+			const clientB = await attemptB;
+
+			expect(manager.getActiveServers()).toContain("fake");
+
+			// --- The race: child A's late exit fires AFTER B is registered ---
+			// Without the identity guard this would delete the "fake" entry,
+			// stranding child B as an untracked process.
+			childA.emit("exit", 137);
+
+			expect(manager.getActiveServers()).toContain("fake");
+			// biome-ignore lint/suspicious/noExplicitAny: test-only access to private state
+			expect((manager as any).clients.get("fake")).toBe(clientB);
+
+			// Cleanly terminate child B before release() so shutdownClient does
+			// not wait 5s for an LSP shutdown response from a fake process.
+			childB.emit("exit", 0);
+		} finally {
+			await manager.release();
+		}
 	});
 });

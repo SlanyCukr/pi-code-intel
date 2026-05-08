@@ -62,6 +62,22 @@ describe("getString", () => {
 		const frontmatter = "name:   spaced-value  ";
 		expect(getString(frontmatter, "name")).toBe("spaced-value");
 	});
+
+	it("only strips matching leading/trailing quote pairs", () => {
+		// Mixed quotes — leave value untouched (don't silently strip both).
+		expect(getString("description: 'foo\"", "description")).toBe("'foo\"");
+		expect(getString('description: "foo\'', "description")).toBe('"foo\'');
+		// Unbalanced (only leading) — leave untouched.
+		expect(getString("name: \"foo", "name")).toBe('"foo');
+		expect(getString("name: foo\"", "name")).toBe('foo"');
+	});
+
+	it("escapes regex metacharacters in the key", () => {
+		// Without escaping, `.` would match any character and produce a false
+		// positive against an unrelated key.
+		const frontmatter = "foo.bar: real\nfooxbar: bogus";
+		expect(getString(frontmatter, "foo.bar")).toBe("real");
+	});
 });
 
 describe("getArray", () => {
@@ -83,5 +99,10 @@ describe("getArray", () => {
 	it("returns empty array for malformed array without closing bracket", () => {
 		const frontmatter = "tools: [read, bash";
 		expect(getArray(frontmatter, "tools")).toEqual([]);
+	});
+
+	it("escapes regex metacharacters in the key", () => {
+		const frontmatter = "foo.bar: [a, b]\nfooxbar: [c, d]";
+		expect(getArray(frontmatter, "foo.bar")).toEqual(["a", "b"]);
 	});
 });

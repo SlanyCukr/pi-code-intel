@@ -13,6 +13,12 @@ import {
 	listTemplates,
 } from "./templates.js";
 
+// Hard bounds on the LLM-requested timeout. The default (set in runner.ts)
+// applies when this is omitted. Bounds prevent a hallucinated value from
+// either aborting almost immediately or running effectively forever.
+const MIN_TIMEOUT_MS = 30_000; // 30 seconds
+const MAX_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 const agentSchema = Type.Object(
 	{
 		type: Type.String({
@@ -23,6 +29,14 @@ const agentSchema = Type.Object(
 			description:
 				"The task to delegate to the sub-agent. Be specific and include all relevant context.",
 		}),
+		timeoutMs: Type.Optional(
+			Type.Integer({
+				minimum: MIN_TIMEOUT_MS,
+				maximum: MAX_TIMEOUT_MS,
+				description:
+					"Optional sub-agent timeout in milliseconds. Defaults to 15 minutes when omitted. Use a larger value (up to 30 minutes) for review-heavy or wide-exploration tasks; smaller for quick lookups. Minimum 30000 (30s).",
+			}),
+		),
 	},
 	{ additionalProperties: false },
 );
@@ -104,6 +118,7 @@ export function createAgentTool(
 				signal,
 				onProgress,
 				parentSessionDir: sessionDir,
+				timeout: input.timeoutMs,
 			});
 
 			if (result.error) {

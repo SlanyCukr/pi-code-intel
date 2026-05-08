@@ -88,8 +88,14 @@ export enum SymbolKind {
 	TypeParameter = 26,
 }
 
+/**
+ * LSP `MarkedString` per the spec — older form some servers still return.
+ * Either a plain string or a fenced code block with a language tag.
+ */
+export type MarkedString = string | { language: string; value: string };
+
 export interface Hover {
-	contents: MarkupContent | string;
+	contents: MarkupContent | MarkedString | MarkedString[];
 	range?: Range;
 }
 
