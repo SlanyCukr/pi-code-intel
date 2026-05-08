@@ -181,13 +181,29 @@ export function resolveSystemPromptFallback(analyzedCwd: string): string {
 
 /**
  * Encode a working-directory path the way pi-coding-agent does for its
- * session subdirectories: leading `--`, replace `/` with `-`, trailing
- * `--`. This must match pi's encoding exactly or we won't find the
- * sessions. Verified against actual pi sessions on disk.
+ * session subdirectories. This MUST match pi's encoding exactly or the
+ * analyzer will look in the wrong directory and silently report "no
+ * sessions found."
+ *
+ * Mirrors the SDK's `getDefaultSessionDir` implementation exactly
+ * (node_modules/@mariozechner/pi-coding-agent/dist/core/session-manager.js):
+ *
+ *   safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`
+ *
+ * The two operations:
+ *   1. Strip ONE leading slash or backslash (path-style independent).
+ *   2. Replace any remaining slash, backslash, or COLON with `-`.
+ *
+ * Colons matter on Windows (drive letters: `C:\...`) and on Unix paths
+ * containing colons (e.g. `/tmp/foo:bar`). An earlier version of this
+ * encoder only replaced `/`, which produced wrong directory names for
+ * those cases and silently lost their sessions. Codex round-5 caught
+ * this; the fix imports no SDK private code and instead mirrors the
+ * one-line transformation byte-for-byte. If the SDK ever changes its
+ * encoding, this is the single place that must be updated.
  */
 export function encodeSessionDirName(cwd: string): string {
-	const normalized = cwd.replace(/\/+$/g, ""); // strip trailing slashes
-	return `-${normalized.replace(/\//g, "-")}--`;
+	return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 
 /**

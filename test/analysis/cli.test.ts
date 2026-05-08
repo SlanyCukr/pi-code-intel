@@ -23,10 +23,6 @@ describe("encodeSessionDirName", () => {
 		expect(encodeSessionDirName("/home/user/proj")).toBe("--home-user-proj--");
 	});
 
-	it("strips trailing slash", () => {
-		expect(encodeSessionDirName("/home/user/proj/")).toBe("--home-user-proj--");
-	});
-
 	it("matches the encoding used by the actual pi sessions directory", () => {
 		// This is the exact directory name pi uses for this repo.
 		const expected = "--home-slanycukr-Documents-personal-projects-my_coding_agent--";
@@ -35,6 +31,55 @@ describe("encodeSessionDirName", () => {
 				"/home/slanycukr/Documents/personal/projects/my_coding_agent",
 			),
 		).toBe(expected);
+	});
+
+	// The cases below mirror the SDK's `getDefaultSessionDir` for inputs
+	// the previous encoder got wrong. If any of these regress, the
+	// analyzer will silently look in a directory pi doesn't write to.
+
+	it("replaces colons in unix paths (regression: round-5 codex)", () => {
+		// `:` is legal in Unix filenames and used by some build systems
+		// (e.g. `proj:variant`). pi sanitizes it; we must too.
+		expect(encodeSessionDirName("/tmp/foo:bar")).toBe("--tmp-foo-bar--");
+	});
+
+	it("handles Windows-style paths with backslashes and drive colons", () => {
+		// `C:\Users\me` on Windows. The SDK does NOT strip the leading
+		// `C` (only a leading `/` or `\`), then replaces `:` and `\`.
+		expect(encodeSessionDirName("C:\\Users\\me")).toBe("--C--Users-me--");
+	});
+
+	it("handles Windows UNC paths (leading double backslash)", () => {
+		// `\\server\share` strips ONE leading backslash, then replaces
+		// the rest. Result has three leading dashes (--<-server-share>--).
+		expect(encodeSessionDirName("\\\\server\\share")).toBe(
+			"---server-share--",
+		);
+	});
+
+	it("encodes the bare root path / as ----", () => {
+		// Root cwd: pi uses `----` (just the four dashes). The previous
+		// encoder used a single leading dash and produced `---`, missing
+		// any session that genuinely had cwd="/".
+		expect(encodeSessionDirName("/")).toBe("----");
+	});
+
+	it("matches the SDK's getDefaultSessionDir() byte-for-byte across cases", async () => {
+		// Property-style sanity: if the SDK ever publishes its helper, we
+		// can swap to it. Until then, this test pins the contract.
+		const sdkEncode = (cwd: string): string =>
+			`--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+		for (const sample of [
+			"/home/user/proj",
+			"/tmp/foo:bar",
+			"C:\\Users\\me",
+			"\\\\server\\share",
+			"/",
+			"/with/multiple:colons:here",
+			"/single",
+		]) {
+			expect(encodeSessionDirName(sample)).toBe(sdkEncode(sample));
+		}
 	});
 });
 
