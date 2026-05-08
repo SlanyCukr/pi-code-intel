@@ -92,13 +92,33 @@ Assistant messages contain `toolCall` content blocks: `{ type: "toolCall", name:
 
 Use `/read-session <path>` to parse and summarize a session file (runs `scripts/parse-session.py`).
 
+### Session analysis (`src/analysis/`)
+
+A one-off CLI for retrospective analysis of past sessions:
+
+```bash
+npm run build
+node dist/analysis/cli-main.js [--cwd PATH] [--since 7d]
+                               [--session UUID] [--out PATH]
+                               [--no-write] [--propose]
+```
+
+Or in-flow: `/analyze-sessions [args]`.
+
+Produces a markdown report at `.pi/analyses/<YYYY-MM-DD>_<HHMMSS>.md` with five sections: Summary (1), Efficiency ratios (2), Anti-pattern hits (3), Outcomes via git correlation (4), and — only when `--propose` is passed — LLM-driven prompt-amendment proposals (5).
+
+**System-prompt capture**: the extension records the rendered system prompt to the session JSONL on every `before_agent_start` whose hash differs from the last capture (via `pi.appendEntry("code-intel:system-prompt", ...)`). This grounds propose mode in what the agent actually saw at session time. Disable via `analysis: { captureSystemPrompt: false }` in `.pi/code-intel.json`. Sessions recorded before this hook existed fall back to the current `src/prompt/system-prompt.ts` source for grounding, with proposals labeled forward-looking.
+
 ## Module Dependencies
 
 ```
-extension.ts → config.ts, lsp/*, web/*, agents/*, commands/*, prompt/*, rtk.ts
+extension.ts → config.ts, lsp/*, web/*, agents/*, commands/*, prompt/*, analysis/capture.ts, rtk.ts
 agents/tool.ts → agents/runner.ts, agents/templates.ts
 agents/runner.ts → agents/templates.ts, prompt/code-exploration.ts, lsp/tool.ts, rtk.ts, types.ts
 agents/templates.ts → utils/frontmatter.ts, utils/templates.ts
+analysis/cli-main.ts → analysis/cli.ts → analysis/{reader, metrics, patterns/*, outcomes, propose, report}.ts
+analysis/capture.ts (self-contained pi hook + customType constant; consumed by reader.ts)
+analysis/propose.ts → types.ts (AnyModel) + pi-coding-agent createAgentSession
 commands/registry.ts → agents/templates.ts, utils/frontmatter.ts, utils/templates.ts
 lsp/tool.ts → lsp/client.ts → lsp/config.ts, lsp/utils.ts, lsp/types.ts
 web/tool.ts → web/fetch.ts, web/summarizer.ts
@@ -106,7 +126,7 @@ web/summarizer.ts → types.ts
 web/context7.ts (self-contained MCP client + tool definition)
 ```
 
-No circular dependencies. `lsp/`, `web/`, `prompt/`, and `utils/` are independent leaf modules (with `web/summarizer.ts` and `agents/runner.ts` sharing the `types.ts` `AnyModel` alias). `agents/templates.ts` is the template registry (parse, load, query). `agents/runner.ts` handles sub-agent execution. `commands/` depends on `agents/templates.ts` (for template grouping). `extension.ts` is the hub that wires everything together.
+No circular dependencies. `lsp/`, `web/`, `prompt/`, and `utils/` are independent leaf modules (with `web/summarizer.ts`, `agents/runner.ts`, and `analysis/propose.ts` sharing the `types.ts` `AnyModel` alias). `agents/templates.ts` is the template registry (parse, load, query). `agents/runner.ts` handles sub-agent execution. `analysis/` is a self-contained subsystem with its own CLI entry; `analysis/capture.ts` is the only file `extension.ts` reaches into directly. `commands/` depends on `agents/templates.ts` (for template grouping). `extension.ts` is the hub that wires everything together.
 
 ## Conventions
 
@@ -114,6 +134,6 @@ No circular dependencies. `lsp/`, `web/`, `prompt/`, and `utils/` are independen
 - `@sinclair/typebox` for tool parameter schemas
 - Use `Model<any>` (not `Model<unknown>`) for pi SDK model types
 - Assets (defaults.json, templates) copied to `dist/` by `scripts/copy-assets.ts`
-- Config files at `.pi/code-intel.json` (project) and `.pi/lsp.json` (LSP overrides). Sections: `lsp`, `agents`, `prompt`, `web`, `context7` — each with `enabled: boolean`.
+- Config files at `.pi/code-intel.json` (project) and `.pi/lsp.json` (LSP overrides). Sections: `lsp`, `agents`, `prompt`, `web`, `context7` — each with `enabled: boolean`. Plus `analysis: { captureSystemPrompt: boolean }` for the session-analysis tooling.
 - All bash commands routed through RTK for token-optimized output — no dedicated grep/find/ls tools
 - Dependency: `@mariozechner/pi-coding-agent ^0.62.0`

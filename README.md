@@ -169,9 +169,20 @@ src/
 │   ├── templates.ts      # Template parsing and registry
 │   ├── tool.ts           # Agent tool definition
 │   └── templates/        # Agent markdown templates
-└── prompt/
-    ├── code-exploration.ts  # LSP-focused code exploration guidance
-    └── system-prompt.ts     # Code intelligence workflow prompt
+├── prompt/
+│   ├── code-exploration.ts  # LSP-focused code exploration guidance
+│   └── system-prompt.ts     # Code intelligence workflow prompt
+└── analysis/
+    ├── capture.ts            # `before_agent_start` hook that persists rendered system prompt
+    ├── cli.ts                # CLI orchestration
+    ├── cli-main.ts           # Executable entry point (built to dist/analysis/cli-main.js)
+    ├── reader.ts             # Session JSONL parser → typed AnalysisEvent stream
+    ├── metrics.ts            # Per-session and aggregated metrics
+    ├── patterns/             # Anti-pattern rule registry (one rule per file)
+    ├── outcomes.ts           # Git-correlation: commits-in-window, revert detection
+    ├── propose.ts            # LLM-driven prompt-amendment proposals
+    ├── report.ts             # Markdown renderer
+    └── types.ts              # AnalysisEvent + AntiPatternHit + ParsedSession
 ```
 
 ## License
