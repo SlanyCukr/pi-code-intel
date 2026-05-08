@@ -57,9 +57,17 @@ function loadCommandTemplates(): CommandTemplate[] {
 /**
  * Register all command templates as pi slash commands.
  *
- * Each command expands its template (replacing $ARGUMENTS) and injects the result
- * into the conversation via sendUserMessage (or sendMessage with display:false
- * as a fallback for older SDK versions).
+ * Each command expands its template (replacing $ARGUMENTS and
+ * $EXTENSION_DIST) and injects the result into the conversation via
+ * sendUserMessage (or sendMessage with display:false as a fallback for
+ * older SDK versions).
+ *
+ * `$EXTENSION_DIST` is substituted with the absolute path to this
+ * extension's compiled `dist/` directory. Use it in templates that
+ * need to invoke a script shipped with the extension — the user's
+ * working directory is unrelated to where the extension lives, so a
+ * relative `dist/...` path would resolve into the user's project and
+ * fail.
  */
 export function registerCommands(pi: ExtensionAPI): void {
 	// Cast to any: pi.registerCommand and pi.sendUserMessage exist
@@ -74,13 +82,20 @@ export function registerCommands(pi: ExtensionAPI): void {
 		return;
 	}
 
+	// Compute the extension's dist root once at registration time.
+	// Templates are loaded from `<dist>/commands/templates/`; `__dirname`
+	// here is `<dist>/commands/`, so its parent is `<dist>`.
+	const extensionDist = dirname(__dirname);
+
 	// Register command templates from the templates directory
 	const templates = loadCommandTemplates();
 	for (const template of templates) {
 		piAny.registerCommand(template.name, {
 			description: template.description,
 			handler: async (args: string) => {
-				const expanded = template.prompt.replace(/\$ARGUMENTS/g, args || "");
+				const expanded = template.prompt
+					.replace(/\$ARGUMENTS/g, args || "")
+					.replace(/\$EXTENSION_DIST/g, extensionDist);
 				if (typeof piAny.sendUserMessage === "function") {
 					piAny.sendUserMessage(expanded);
 				} else if (typeof piAny.sendMessage === "function") {

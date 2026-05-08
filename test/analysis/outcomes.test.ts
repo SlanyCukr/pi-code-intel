@@ -141,24 +141,58 @@ describe("correlateOutcomes", () => {
 		tmp = mkdtempSync(join(tmpdir(), "pi-outcomes-"));
 		repoDir = join(tmp, "fake-repo");
 		mkdirSync(repoDir, { recursive: true });
-		// Make it look like a git repo (presence of .git is what
-		// `correlateOutcomes` checks; the stub runner means git is never
-		// actually invoked).
-		mkdirSync(join(repoDir, ".git"), { recursive: true });
 	});
 
 	afterEach(() => {
 		rmSync(tmp, { recursive: true, force: true });
 	});
 
-	it("marks gitUnavailable when cwd is not a git repo", () => {
+	/**
+	 * Stub handler that answers `git rev-parse --is-inside-work-tree`
+	 * with "true\n" — the response real git emits for any cwd inside a
+	 * worktree. Tests that want to simulate "not a worktree" simply omit
+	 * this handler so the runner throws.
+	 */
+	const worktreeYes = (args: string[]) =>
+		args[0] === "rev-parse" && args.includes("--is-inside-work-tree")
+			? "true\n"
+			: undefined;
+
+	it("marks gitUnavailable when rev-parse reports not-a-worktree", () => {
 		const nonRepo = join(tmp, "no-git");
 		mkdirSync(nonRepo);
 		const session = makeSession(nonRepo, "2026-05-08T10:00:00.000Z");
-		const { runner } = stubGit([]);
+		const { runner } = stubGit([
+			(args) => {
+				if (args[0] === "rev-parse") {
+					throw new Error("fatal: not a git repository");
+				}
+				return undefined;
+			},
+		]);
 		const out = correlateOutcomes(session, { runGit: runner });
 		expect(out.gitUnavailable).toBe(true);
-		expect(out.gitUnavailableReason).toMatch(/not a git repository/);
+		expect(out.gitUnavailableReason).toMatch(/not inside a git worktree/);
+		expect(out.commitsInWindow).toEqual([]);
+	});
+
+	it("recognizes a session run from a SUBDIRECTORY of a git worktree (no .git in cwd)", () => {
+		// Regression: previous heuristic used existsSync(cwd/.git) which
+		// returned false for subdirectories of a repo, incorrectly
+		// reporting `git n/a` for monorepo / package workflows.
+		const session = makeSession(repoDir, "2026-05-08T10:00:00.000Z", [
+			toolResult(false, "2026-05-08T10:30:00.000Z"),
+		]);
+		const { runner } = stubGit([
+			worktreeYes,
+			(args) => (args[0] === "config" ? "u@e.x\n" : undefined),
+			(args) => (args[0] === "log" ? "" : undefined),
+		]);
+		const out = correlateOutcomes(session, {
+			runGit: runner,
+			now: new Date("2026-05-08T11:00:00.000Z"),
+		});
+		expect(out.gitUnavailable).toBe(false);
 		expect(out.commitsInWindow).toEqual([]);
 	});
 
@@ -173,6 +207,7 @@ describe("correlateOutcomes", () => {
 	it("marks gitUnavailable when git config user.email throws", () => {
 		const session = makeSession(repoDir, "2026-05-08T10:00:00.000Z");
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => {
 				if (args[0] === "config") throw new Error("git not found");
 				return undefined;
@@ -186,6 +221,7 @@ describe("correlateOutcomes", () => {
 	it("marks gitUnavailable when user.email is empty", () => {
 		const session = makeSession(repoDir, "2026-05-08T10:00:00.000Z");
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "\n" : undefined),
 		]);
 		const out = correlateOutcomes(session, { runGit: runner });
@@ -198,6 +234,7 @@ describe("correlateOutcomes", () => {
 			toolResult(false, "2026-05-08T10:30:00.000Z"),
 		]);
 		const { runner, calls } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "tester@example.com\n" : undefined),
 			(args) => {
 				if (
@@ -236,6 +273,7 @@ describe("correlateOutcomes", () => {
 		const session = makeSession(repoDir, "2026-05-08T10:00:00.000Z");
 		const ourSha = "feedface00000000000000000000000000000000";
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "x@y.z\n" : undefined),
 			(args) =>
 				args.includes("--author=x@y.z")
@@ -257,6 +295,7 @@ describe("correlateOutcomes", () => {
 		const session = makeSession(repoDir, "2026-05-08T10:00:00.000Z");
 		const ourSha = "feedface00000000000000000000000000000000";
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "x@y.z\n" : undefined),
 			(args) =>
 				args.includes("--author=x@y.z")
@@ -274,6 +313,7 @@ describe("correlateOutcomes", () => {
 			toolResult(true, "2026-05-08T10:02:00.000Z"),
 		]);
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "x@y.z\n" : undefined),
 			(args) => (args[0] === "log" ? "" : undefined),
 		]);
@@ -287,6 +327,7 @@ describe("correlateOutcomes", () => {
 			toolResult(false, "2026-05-08T10:02:00.000Z"),
 		]);
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "x@y.z\n" : undefined),
 			(args) => (args[0] === "log" ? "" : undefined),
 		]);
@@ -297,6 +338,7 @@ describe("correlateOutcomes", () => {
 	it("computes lastToolWasError = null when session has no tool_result events", () => {
 		const session = makeSession(repoDir, "2026-05-08T10:00:00.000Z", []);
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "x@y.z\n" : undefined),
 			(args) => (args[0] === "log" ? "" : undefined),
 		]);
@@ -318,6 +360,7 @@ describe("correlateOutcomes", () => {
 			},
 		]);
 		const { runner } = stubGit([
+			worktreeYes,
 			(args) => (args[0] === "config" ? "x@y.z\n" : undefined),
 			(args) => (args[0] === "log" ? "" : undefined),
 		]);
@@ -332,7 +375,6 @@ describe("correlateOutcomes — write-fixture-then-fake-repo (no real git)", () 
 		try {
 			const repoDir = join(tmp, "alpha");
 			mkdirSync(repoDir, { recursive: true });
-			mkdirSync(join(repoDir, ".git"), { recursive: true });
 
 			const session: ParsedSession = {
 				header: {
@@ -348,6 +390,10 @@ describe("correlateOutcomes — write-fixture-then-fake-repo (no real git)", () 
 				malformedLines: 0,
 			};
 			const { runner, calls } = stubGit([
+				(args) =>
+					args[0] === "rev-parse" && args.includes("--is-inside-work-tree")
+						? "true\n"
+						: undefined,
 				(args) => (args[0] === "config" ? "x@y.z" : undefined),
 				(args) => (args[0] === "log" ? "" : undefined),
 			]);

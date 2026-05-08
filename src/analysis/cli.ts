@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { aggregateMetrics, extractMetrics } from "./metrics.js";
 import { correlateOutcomes, type OutcomeData } from "./outcomes.js";
@@ -66,6 +66,12 @@ export interface AnalysisResult {
  * the function is effectively still synchronous.
  */
 export async function runAnalysis(args: AnalysisArgs): Promise<AnalysisResult> {
+	// Always resolve cwd to an absolute path: pi stores absolute cwds in
+	// its session subdirectory names, so a relative input like "." or
+	// "./proj" would be encoded as `--.--` / `--.-proj--` and find no
+	// sessions despite the dir existing. Normalizing here protects both
+	// the CLI entry and any programmatic caller.
+	args = { ...args, cwd: resolve(args.cwd) };
 	const sessionsDir = resolveSessionsDir(args.cwd);
 	const candidates = listSessionFiles(sessionsDir, args);
 	const parsed: ParsedSession[] = [];

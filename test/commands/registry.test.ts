@@ -199,6 +199,46 @@ describe("registerCommands", () => {
 		expect(names).toContain("agents");
 	});
 
+	it("substitutes $EXTENSION_DIST in slash command prompts at expansion time", async () => {
+		// Regression: a template that referenced a relative path like
+		// `dist/analysis/cli-main.js` failed when pi was loaded into any
+		// project other than this extension's checkout. Templates now use
+		// `$EXTENSION_DIST` and the registry rewrites it to the absolute
+		// dist path at command-expansion time.
+		const { registerCommands } = await import(
+			"../../src/commands/registry.js"
+		);
+
+		const sentMessages: string[] = [];
+		const mockPi = {
+			registerCommand: vi.fn(
+				(_name: string, options: { handler: (args: string) => Promise<void> }) => {
+					(mockPi as any)._handlers ??= new Map();
+					(mockPi as any)._handlers.set(_name, options.handler);
+				},
+			),
+			sendUserMessage: vi.fn((content: string) => {
+				sentMessages.push(content);
+			}),
+		};
+
+		registerCommands(mockPi as any);
+
+		// Drive the analyze-sessions handler. The expanded prompt should
+		// contain an absolute path, not the literal $EXTENSION_DIST token.
+		const handler = (mockPi as any)._handlers.get("analyze-sessions");
+		expect(handler).toBeDefined();
+		await handler("--since 7d");
+
+		expect(sentMessages).toHaveLength(1);
+		const expanded = sentMessages[0];
+		expect(expanded).not.toContain("$EXTENSION_DIST");
+		// We can't predict the exact path (it depends on whether tests run
+		// against src/ or dist/), but it must be absolute and end with the
+		// expected analyzer entry.
+		expect(expanded).toMatch(/\/analysis\/cli-main\.js/);
+	});
+
 	it("skips registration if pi.registerCommand is not available", async () => {
 		const { registerCommands } = await import(
 			"../../src/commands/registry.js"

@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import type { AnalysisEvent, ParsedSession } from "./types.js";
 
 /**
@@ -91,22 +90,26 @@ export function correlateOutcomes(
 	const lastToolWasError = computeLastToolWasError(session.events);
 
 	const cwd = session.header.cwd;
-	if (!cwd || !existsSync(cwd) || !isGitRepo(cwd)) {
-		return {
-			sessionId: session.header.id,
-			cwd,
-			windowStart: start,
-			windowEnd: end,
-			gitUnavailable: true,
-			gitUnavailableReason: !cwd
-				? "session header has no cwd"
-				: !existsSync(cwd)
-					? "session cwd no longer exists"
-					: "cwd is not a git repository",
-			commitsInWindow: [],
-			revertedShas: [],
+	if (!cwd) {
+		return unavailable(session, start, end, lastToolWasError, "session header has no cwd");
+	}
+	if (!existsSync(cwd)) {
+		return unavailable(
+			session,
+			start,
+			end,
 			lastToolWasError,
-		};
+			"session cwd no longer exists",
+		);
+	}
+	if (!isInsideGitWorktree(runGit, cwd)) {
+		return unavailable(
+			session,
+			start,
+			end,
+			lastToolWasError,
+			"cwd is not inside a git worktree",
+		);
 	}
 
 	let userEmail: string;
@@ -231,13 +234,49 @@ function computeLastToolWasError(events: AnalysisEvent[]): boolean | null {
 	return null;
 }
 
-function isGitRepo(cwd: string): boolean {
+/**
+ * Detect whether `cwd` is somewhere inside a git worktree. Walks up the
+ * directory tree the way git itself does, so a session run from a
+ * subdirectory of a repository (the common monorepo / package case)
+ * still gets correlated outcomes instead of `git n/a`.
+ *
+ * Implementation uses the same runner the rest of correlateOutcomes
+ * uses, so tests can stub it. A non-zero exit (e.g. “not a git
+ * repository”) becomes a thrown error from execFileSync; we treat any
+ * thrown error as “not a worktree”. The expected stdout for a true
+ * answer is exactly "true\n".
+ */
+function isInsideGitWorktree(runGit: GitRunner, cwd: string): boolean {
 	try {
-		const dotGit = join(cwd, ".git");
-		return existsSync(dotGit) && (statSync(dotGit).isDirectory() || statSync(dotGit).isFile());
+		const out = runGit(["rev-parse", "--is-inside-work-tree"], cwd);
+		return out.trim() === "true";
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Build a uniform `gitUnavailable: true` OutcomeData record. Centralizing
+ * this avoids drift between the multiple early-return paths.
+ */
+function unavailable(
+	session: ParsedSession,
+	windowStart: string,
+	windowEnd: string,
+	lastToolWasError: boolean | null,
+	reason: string,
+): OutcomeData {
+	return {
+		sessionId: session.header.id,
+		cwd: session.header.cwd,
+		windowStart,
+		windowEnd,
+		gitUnavailable: true,
+		gitUnavailableReason: reason,
+		commitsInWindow: [],
+		revertedShas: [],
+		lastToolWasError,
+	};
 }
 
 /**

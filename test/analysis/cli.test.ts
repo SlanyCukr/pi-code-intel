@@ -274,6 +274,35 @@ describe("runAnalysis", () => {
 		}
 	});
 
+	it("resolves a relative cwd to absolute before encoding the sessions directory", async () => {
+		// Regression: pi stores absolute cwds in its session subdir names.
+		// A relative `cwd` like "." or "./proj" used to be encoded as
+		// `--.--` and the analyzer would find no sessions despite the dir
+		// existing. We now resolve to an absolute path inside runAnalysis.
+		const homeBackup = process.env.HOME;
+		const cwdBackup = process.cwd();
+		process.env.HOME = tmp;
+		try {
+			const { fakeCwd, fakeSessionsRoot } = setupFakeHome(tmp);
+			writeFakeSession(
+				fakeSessionsRoot,
+				fakeCwd,
+				"sess1.jsonl",
+				{ type: "session", version: 3, id: "u", timestamp: "t", cwd: fakeCwd },
+				[],
+			);
+			process.chdir(fakeCwd);
+			// Pass a relative cwd; if the analyzer didn't resolve it, this
+			// would look in `--.--`, find no sessions dir, and return [].
+			const result = await runAnalysis({ cwd: ".", noWrite: true });
+			expect(result.sessionFilesAnalyzed).toHaveLength(1);
+		} finally {
+			process.chdir(cwdBackup);
+			if (homeBackup === undefined) delete process.env.HOME;
+			else process.env.HOME = homeBackup;
+		}
+	});
+
 	it("--session does NOT match a prefix that appears only in the timestamp portion of the filename", async () => {
 		// Regression: previously `--session 2026` (a year prefix that
 		// exists in the timestamp) matched every session from that year
