@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Fast feedback loop: typecheck + unit tests on every push.
+  # Runs in parallel with the slower jobs below.
+  unit:
+    name: typecheck + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  # Foreign-install integration: pack + npm install + run analyzer
+  # from the installed location. Catches packaging bugs (missing
+  # files, missing peerDeps, broken main entry) that unit tests
+  # cannot. ~30-60s end-to-end.
+  foreign-install:
+    name: foreign-install integration test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run test:foreign
+
+  # Real Context7 MCP smoke test: spawns the actual upstream server,
+  # exercises the wire framing + tool API end-to-end. Catches
+  # protocol drift in the pinned ^2.2.4 range. Network-dependent,
+  # so allowed to fail without blocking other jobs (the pin can be
+  # tightened manually if this starts flaking).
+  mcp-smoke:
+    name: Context7 MCP smoke test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run smoke
+        timeout-minutes: 3

@@ -24,7 +24,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"smoke": "npm run build && node --experimental-strip-types scripts/mcp-smoke-test.ts",
-		"test:foreign": "node --experimental-strip-types scripts/foreign-install-test.ts"
+		"test:foreign": "npm run build && node --experimental-strip-types scripts/foreign-install-test.ts"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "^0.34.0",
