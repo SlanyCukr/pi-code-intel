@@ -1,7 +1,4 @@
-import {
-	SessionManager,
-	createAgentSession,
-} from "@mariozechner/pi-coding-agent";
+import { createIsolatedSession } from "../isolated-session.js";
 import type { AnyModel } from "../types.js";
 
 /** Content below this threshold is returned as-is without model summarization. */
@@ -60,13 +57,11 @@ export async function summarizeContent(options: SummarizeOptions): Promise<strin
 		throw new Error("Summarization aborted");
 	}
 
-	// Create a minimal agent session for extraction
-	const { session } = await createAgentSession({
-		cwd,
-		model,
-		tools: [], // No tools needed — just text in, text out
-		sessionManager: SessionManager.inMemory(cwd),
-	});
+	// Create a minimal, isolated agent session for extraction.
+	// Isolation matters: createAgentSession by default re-loads project
+	// extensions, which would re-attach our own prompt rewriter and
+	// silently overwrite `setSystemPrompt("")` on the next agent loop.
+	const { session } = await createIsolatedSession({ cwd, model });
 
 	// Window between createAgentSession (async) and listener attachment —
 	// re-check so an abort that fired during session construction is not lost.

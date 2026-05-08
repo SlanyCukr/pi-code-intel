@@ -16,6 +16,14 @@ export const SYSTEM_PROMPT_CUSTOM_TYPE = "code-intel:system-prompt";
  * is edited mid-session, the active tool set changes, or other
  * extensions chain modifications).
  *
+ * Per-session dedupe: when the user switches sessions (`/new`,
+ * `/resume`, fork, etc.), the in-process closure's `lastPromptHash` is
+ * reset so the next agent loop in the new session writes a capture
+ * even if the prompt text is unchanged. Without this reset, two
+ * sessions with the same prompt would produce captures only in the
+ * first — and any later analysis of the second session would fall
+ * back to source-grounding instead of the actual prompt the agent saw.
+ *
  * Failure mode: any error from `pi.appendEntry` is logged and swallowed.
  * A capture failure must NEVER abort the session.
  *
@@ -63,5 +71,14 @@ export function installSystemPromptCapture(pi: ExtensionAPI): void {
 				err instanceof Error ? err.message : err,
 			);
 		}
+	});
+
+	// Reset the dedupe hash whenever pi switches to another session
+	// ("/new", "/resume", forks, branches). Each session's JSONL needs
+	// at least one capture even if its prompt text matches the previous
+	// session's — otherwise propose-mode falls back to source-grounding
+	// for that session.
+	pi.on("session_switch", () => {
+		lastPromptHash = "";
 	});
 }

@@ -17,13 +17,16 @@ import type {
 	SessionHeader,
 } from "../../src/analysis/types.js";
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
-	SessionManager: { inMemory: vi.fn(() => ({})) },
-	createAgentSession: vi.fn(),
+// Mock the isolation helper instead of the SDK directly. The propose
+// module's contract with pi-coding-agent now goes through this single
+// boundary, so mocking it isolates these tests from the resource-loader
+// machinery added for extension isolation.
+vi.mock("../../src/isolated-session.js", () => ({
+	createIsolatedSession: vi.fn(),
 }));
 
-import { createAgentSession } from "@mariozechner/pi-coding-agent";
-const mockCreateSession = vi.mocked(createAgentSession);
+import { createIsolatedSession } from "../../src/isolated-session.js";
+const mockCreateSession = vi.mocked(createIsolatedSession);
 
 beforeEach(() => {
 	vi.clearAllMocks();

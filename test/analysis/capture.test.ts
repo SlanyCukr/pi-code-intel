@@ -16,15 +16,19 @@ interface FakePi {
 	on: ReturnType<typeof vi.fn>;
 	appendEntry: ReturnType<typeof vi.fn>;
 	getActiveTools: ReturnType<typeof vi.fn>;
-	/** The captured handler from `pi.on("before_agent_start", h)`. */
+	/** The captured handler for `before_agent_start`. */
 	getHandler(): (event: { systemPrompt?: string }) => void;
+	/** The captured handler for `session_switch`. */
+	getSwitchHandler(): (event: unknown) => void;
 }
 
 function makeFakePi(opts: { withAppendEntry?: boolean; appendEntryThrows?: Error } = {}): FakePi {
 	const captured: Array<(event: any) => void> = [];
+	const switchCaptured: Array<(event: any) => void> = [];
 	const fake: any = {
 		on: vi.fn((eventName: string, handler: (event: any) => void) => {
 			if (eventName === "before_agent_start") captured.push(handler);
+			if (eventName === "session_switch") switchCaptured.push(handler);
 		}),
 		getActiveTools: vi.fn(() => ["read", "edit", "lsp"]),
 	};
@@ -37,6 +41,10 @@ function makeFakePi(opts: { withAppendEntry?: boolean; appendEntryThrows?: Error
 	fake.getHandler = () => {
 		expect(captured).toHaveLength(1);
 		return captured[0];
+	};
+	fake.getSwitchHandler = () => {
+		expect(switchCaptured).toHaveLength(1);
+		return switchCaptured[0];
 	};
 	return fake as FakePi;
 }
@@ -52,11 +60,30 @@ describe("installSystemPromptCapture", () => {
 		consoleErrorSpy.mockRestore();
 	});
 
-	it("registers a single before_agent_start handler", () => {
+	it("registers handlers for before_agent_start and session_switch", () => {
 		const pi = makeFakePi();
 		installSystemPromptCapture(pi as any);
-		expect(pi.on).toHaveBeenCalledTimes(1);
+		expect(pi.on).toHaveBeenCalledTimes(2);
 		expect(pi.on).toHaveBeenCalledWith("before_agent_start", expect.any(Function));
+		expect(pi.on).toHaveBeenCalledWith("session_switch", expect.any(Function));
+	});
+
+	it("resets the dedupe hash on session_switch so the next session captures even if the prompt is unchanged", () => {
+		const pi = makeFakePi();
+		installSystemPromptCapture(pi as any);
+		const onPrompt = pi.getHandler();
+		const onSwitch = pi.getSwitchHandler();
+
+		onPrompt({ systemPrompt: "identical prompt" });
+		onPrompt({ systemPrompt: "identical prompt" }); // same session, deduped
+		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
+
+		// Switch to a new session
+		onSwitch({ type: "session_switch", reason: "new", previousSessionFile: "prev.jsonl" });
+
+		// Same prompt text in the new session must produce a fresh capture.
+		onPrompt({ systemPrompt: "identical prompt" });
+		expect(pi.appendEntry).toHaveBeenCalledTimes(2);
 	});
 
 	it("appends an entry on first capture with text/hash/capturedAt/activeTools", () => {

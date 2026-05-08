@@ -1,16 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildExtractionPrompt, summarizeContent } from "../../src/web/summarizer.js";
 
-// Mock createAgentSession
-vi.mock("@mariozechner/pi-coding-agent", () => ({
-	SessionManager: {
-		inMemory: vi.fn(() => ({})),
-	},
-	createAgentSession: vi.fn(),
+// Summarizer now goes through the createIsolatedSession helper, which
+// itself wraps pi-coding-agent's createAgentSession with a no-extensions
+// resource loader. We mock at the helper boundary so these tests don't
+// have to know about the loader machinery.
+vi.mock("../../src/isolated-session.js", () => ({
+	createIsolatedSession: vi.fn(),
 }));
 
-import { createAgentSession } from "@mariozechner/pi-coding-agent";
-const mockCreateSession = vi.mocked(createAgentSession);
+import { createIsolatedSession } from "../../src/isolated-session.js";
+const mockCreateSession = vi.mocked(createIsolatedSession);
 
 beforeEach(() => {
 	vi.clearAllMocks();

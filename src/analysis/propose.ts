@@ -1,8 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import {
-	SessionManager,
-	createAgentSession,
-} from "@mariozechner/pi-coding-agent";
+import type { createAgentSession } from "@mariozechner/pi-coding-agent";
+import { createIsolatedSession } from "../isolated-session.js";
 import type { AnyModel } from "../types.js";
 import type { AggregatedMetrics, SessionMetrics } from "./metrics.js";
 import type { AntiPatternHit, ParsedSession } from "./types.js";
@@ -260,11 +258,14 @@ export async function generateProposals(
 	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | null = null;
 	let abortHandler: (() => void) | null = null;
 	try {
-		({ session } = await createAgentSession({
+		// Isolated session: extensions/skills/prompts/themes are NOT loaded.
+		// Without this isolation, our own pi-code-intel prompt rewriter would
+		// re-attach to the inner session and clobber `setSystemPrompt("")`,
+		// turning what's meant to be a no-tools / empty-prompt single-turn
+		// call into a full coding-agent invocation.
+		({ session } = await createIsolatedSession({
 			cwd: options.cwd,
 			model: options.model,
-			tools: [],
-			sessionManager: SessionManager.inMemory(options.cwd),
 		}));
 
 		if (options.signal?.aborted) {

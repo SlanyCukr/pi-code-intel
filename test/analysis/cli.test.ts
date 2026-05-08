@@ -241,7 +241,7 @@ describe("runAnalysis", () => {
 		}
 	});
 
-	it("filters sessions by --session (UUID-prefix substring match)", async () => {
+	it("filters sessions by --session (UUID-prefix match against UUID portion only)", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;
 		try {
@@ -268,6 +268,41 @@ describe("runAnalysis", () => {
 			});
 			expect(result.sessionFilesAnalyzed).toHaveLength(1);
 			expect(result.sessionFilesAnalyzed[0]).toContain("aaaaaaaa");
+		} finally {
+			if (homeBackup === undefined) delete process.env.HOME;
+			else process.env.HOME = homeBackup;
+		}
+	});
+
+	it("--session does NOT match a prefix that appears only in the timestamp portion of the filename", async () => {
+		// Regression: previously `--session 2026` (a year prefix that
+		// exists in the timestamp) matched every session from that year
+		// because the filter used `name.includes(...)`. We now match the
+		// UUID portion only.
+		const homeBackup = process.env.HOME;
+		process.env.HOME = tmp;
+		try {
+			const { fakeCwd, fakeSessionsRoot } = setupFakeHome(tmp);
+			writeFakeSession(
+				fakeSessionsRoot,
+				fakeCwd,
+				"2026-05-08T10-00-00Z_aaaaaaaa-bbbb.jsonl",
+				{ type: "session", version: 3, id: "a", timestamp: "t", cwd: fakeCwd },
+				[],
+			);
+			writeFakeSession(
+				fakeSessionsRoot,
+				fakeCwd,
+				"2026-05-08T11-00-00Z_cccccccc-dddd.jsonl",
+				{ type: "session", version: 3, id: "c", timestamp: "t", cwd: fakeCwd },
+				[],
+			);
+			const result = await runAnalysis({
+				cwd: fakeCwd,
+				sessionId: "2026", // year prefix, NOT a UUID prefix
+				noWrite: true,
+			});
+			expect(result.sessionFilesAnalyzed).toEqual([]);
 		} finally {
 			if (homeBackup === undefined) delete process.env.HOME;
 			else process.env.HOME = homeBackup;

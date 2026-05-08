@@ -190,11 +190,19 @@ function listSessionFiles(sessionsDir: string, args: AnalysisArgs): string[] {
 		.sort((a, b) => a.mtimeMs - b.mtimeMs);
 
 	if (args.sessionId !== undefined) {
-		// Match by UUID-prefix: the filename includes the UUID after the
-		// timestamp (e.g. 2026-05-08T...Z_<uuid>.jsonl). Match anywhere
-		// in the filename so prefixes work regardless of the timestamp.
+		// Pi session filenames look like `<timestamp>_<uuid>.jsonl`.
+		// We only want to prefix-match against the UUID, not the timestamp:
+		// otherwise a value like `--session 2026` would match every session
+		// from that year. Split on the last underscore so timestamps that
+		// happen to contain underscores still resolve correctly.
+		const sessionId = args.sessionId;
 		return entries
-			.filter(({ name }) => name.includes(args.sessionId!))
+			.filter(({ name }) => {
+				const base = name.replace(/\.jsonl$/i, "");
+				const underscoreIdx = base.lastIndexOf("_");
+				const uuidPart = underscoreIdx >= 0 ? base.slice(underscoreIdx + 1) : base;
+				return uuidPart.startsWith(sessionId);
+			})
 			.map(({ full }) => full);
 	}
 
