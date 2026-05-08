@@ -187,11 +187,14 @@ describe("registerCommands", () => {
 
 		registerCommands(mockPi as any);
 
-		expect(mockPi.registerCommand).toHaveBeenCalledTimes(3);
+		// 3 markdown templates (feature-dev, review-pr, read-session)
+		// + the always-on /agents command = 4 registrations.
+		expect(mockPi.registerCommand).toHaveBeenCalledTimes(4);
 
 		const names = registered.map((r) => r.name);
 		expect(names).toContain("feature-dev");
 		expect(names).toContain("review-pr");
+		expect(names).toContain("read-session");
 		expect(names).toContain("agents");
 	});
 

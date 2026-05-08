@@ -25,11 +25,10 @@ This intent doc covers the first commit of a multi-commit reorganization of pre-
 - Tests for: HTML conversion, JSON formatting, truncation, caching, error paths, AbortError handling, content-length and streaming size limits, and the full SSRF matrix (literal IPs, IPv4-mapped IPv6, multi-A-record bypass, DNS lookup failure surface).
 - A new shared type alias `AnyModel` extracted to `src/types.ts` so summarizer (and later runner) can share the `Model<any>` shape used across pi-coding-agent.
 
-**Out of scope (deferred to later commits):**
-- Tool registration in the extension entry point (`src/extension.ts`).
-- Config plumbing (`src/config.ts` `web` section).
-- System-prompt guidance for when to use the tool (`src/prompt/system-prompt.ts`).
-- The Context7 MCP integration (separate commit — sibling feature, not coupled).
+**Out of scope:**
+- The Context7 MCP integration (sibling feature — has its own commit and is documented as a peer, not a dependency).
+
+*(All other items originally listed here — tool registration in `src/extension.ts`, `web` config section in `src/config.ts`, and system-prompt guidance in `src/prompt/system-prompt.ts` — were delivered in the same multi-commit reorganization that this doc retroactively records, and are now in the codebase.)*
 
 ## Architectural Decisions
 

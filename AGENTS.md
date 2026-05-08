@@ -15,6 +15,25 @@ npm run dev        # Watch mode for TypeScript compilation
 
 Always run `npm run build && npm test` before considering any change complete.
 
+## Issue handling
+
+If you discover an issue while working on something else — stale docs, broken comments, mislabeled types, dead code, a bug adjacent to your change, a doc that contradicts the code, anything — you MUST address it in the same session. Choose one of:
+
+1. **Fix it now.** A small extra commit is fine and preferred for rot.
+2. **Surface it to your partner and pause** until they decide.
+
+You MUST NOT use any of these escape hatches:
+- "pre-existing"
+- "out of scope"
+- "for a follow-up commit"
+- "noted in known gaps" / "flagged for later"
+- "documented for later" / "TODO for the next session"
+- any equivalent label that lets the issue survive into the next session
+
+These labels are how rot accumulates. The only honest options are *fix* or *escalate*. The pattern "I'll note this and continue with my main task" is banned. Logging a finding to a TODO is not a fix.
+
+When in doubt, fix it. The cost of one small unnecessary commit is far smaller than the cost of an issue surviving to ten sessions from now.
+
 ## Key Patterns
 
 ### Tool Definitions
