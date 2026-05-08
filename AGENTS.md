@@ -7,13 +7,25 @@ Pi extension package that adds LSP support, sub-agents, web fetch, Context7 libr
 ## Build & Test
 
 ```bash
-npm run build      # Compile TypeScript + copy assets (defaults.json, templates)
+npm run build       # Compile TypeScript + copy assets (defaults.json, templates, parse-session.py, system-prompt.source.ts)
 npm run typecheck   # Type check without emitting
-npm test           # Run vitest tests
-npm run dev        # Watch mode for TypeScript compilation
+npm test            # Run vitest tests (fast; ~2s for 507 tests)
+npm run dev         # Watch mode for TypeScript compilation
+
+# Slower integration tests (NOT in `npm test`):
+npm run smoke         # Real Context7 MCP smoke test against `npx -y @upstash/context7-mcp@^2.2.4`. ~30-60s first run (npx download), ~5-10s warm. Network required.
+npm run test:foreign  # `npm pack` + install into temp project + run analyzer from installed location. Catches packaging bugs (missing files, broken peerDeps, dist-not-shipped). ~30-60s.
 ```
 
-Always run `npm run build && npm test` before considering any change complete.
+Always run `npm run build && npm test` before considering any change complete. For changes that touch the Context7 client, the analyzer's published surface, or the `package.json#files` allowlist, also run `npm run smoke` and `npm run test:foreign`.
+
+### CI
+
+`.github/workflows/ci.yml` runs three jobs in parallel on every push to `main` and every PR:
+
+- **`unit`**: typecheck + build + `npm test`. Required for merge. Installs `rtk@v0.39.0` because `test/rtk.test.ts` exercises the real binary.
+- **`foreign-install`**: runs `npm run test:foreign`. Required for merge.
+- **`mcp-smoke`**: runs `npm run smoke`. `continue-on-error: true` because it depends on the upstream Context7 service being reachable; treat failures as a signal to investigate, not as a merge blocker.
 
 ## Issue handling
 
@@ -123,7 +135,15 @@ Or in-flow: `/analyze-sessions [args]`.
 
 Produces a markdown report at `.pi/analyses/<YYYY-MM-DD>_<HHMMSS>.md` with five sections: Summary (1), Efficiency ratios (2), Anti-pattern hits (3), Outcomes via git correlation (4), and — only when `--propose` is passed — LLM-driven prompt-amendment proposals (5).
 
-**System-prompt capture**: the extension records the rendered system prompt to the session JSONL on every `before_agent_start` whose hash differs from the last capture (via `pi.appendEntry("code-intel:system-prompt", ...)`). This grounds propose mode in what the agent actually saw at session time. Disable via `analysis: { captureSystemPrompt: false }` in `.pi/code-intel.json`. Sessions recorded before this hook existed fall back to the current `src/prompt/system-prompt.ts` source for grounding, with proposals labeled forward-looking.
+**System-prompt capture**: the extension records the rendered system prompt to the session JSONL on every `before_agent_start` whose hash differs from the last capture (via `pi.appendEntry("code-intel:system-prompt", ...)`). The dedupe hash is reset on `session_switch` (covers `/new` and `/resume`) AND `session_fork` — both create new JSONL files that need their own capture. `session_compact` and `session_tree` stay in the same file and intentionally do NOT reset (see capture.ts for the analysis). This grounds propose mode in what the agent actually saw at session time. Disable via `analysis: { captureSystemPrompt: false }` in `.pi/code-intel.json`.
+
+Sessions recorded before this hook existed fall back to a system-prompt source. The fallback search order (`resolveSystemPromptFallback` in cli.ts):
+1. `<dist>/prompt/system-prompt.source.ts` — shipped via copy-assets.ts. Always available when the extension is installed normally.
+2. `<analyzed-cwd>/src/prompt/system-prompt.ts` — only when the operator is analyzing this very repo's checkout. Kept as a secondary path so dev iteration still works against fresh source even when dist is stale.
+
+When the fallback is used, proposals are labeled forward-looking in the report footer.
+
+**Session-directory encoding**: `encodeSessionDirName(cwd)` in cli.ts mirrors the SDK's `getDefaultSessionDir` byte-for-byte: `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`. Strips one leading slash/backslash, then replaces remaining slashes, backslashes, and colons with `-`. Colons matter on Windows (`C:\...`) and on Unix paths containing colons. If pi ever changes its encoding, this is the single place that must be updated.
 
 ## Module Dependencies
 
@@ -133,13 +153,15 @@ agents/tool.ts → agents/runner.ts, agents/templates.ts
 agents/runner.ts → agents/templates.ts, prompt/code-exploration.ts, lsp/tool.ts, rtk.ts, types.ts
 agents/templates.ts → utils/frontmatter.ts, utils/templates.ts
 analysis/cli-main.ts → analysis/cli.ts → analysis/{reader, metrics, patterns/*, outcomes, propose, report}.ts
+analysis/cli.ts → @mariozechner/pi-coding-agent (getAgentDir for $PI_CODING_AGENT_DIR)
 analysis/capture.ts (self-contained pi hook + customType constant; consumed by reader.ts)
-analysis/propose.ts → types.ts (AnyModel) + pi-coding-agent createAgentSession
-commands/registry.ts → agents/templates.ts, utils/frontmatter.ts, utils/templates.ts
+analysis/propose.ts → types.ts (AnyModel) + isolated-session.ts
+isolated-session.ts (single boundary for one-off LLM calls; consumed by propose.ts and web/summarizer.ts)
+commands/registry.ts → agents/templates.ts, utils/frontmatter.ts, utils/templates.ts (exposes $EXTENSION_DIST substitution)
 lsp/tool.ts → lsp/client.ts → lsp/config.ts, lsp/utils.ts, lsp/types.ts
 web/tool.ts → web/fetch.ts, web/summarizer.ts
-web/summarizer.ts → types.ts
-web/context7.ts (self-contained MCP client + tool definition)
+web/summarizer.ts → types.ts, isolated-session.ts
+web/context7.ts (self-contained MCP client + tool definition; CONTEXT7_MCP_VERSION pin)
 ```
 
 No circular dependencies. `lsp/`, `web/`, `prompt/`, and `utils/` are independent leaf modules (with `web/summarizer.ts`, `agents/runner.ts`, and `analysis/propose.ts` sharing the `types.ts` `AnyModel` alias). `agents/templates.ts` is the template registry (parse, load, query). `agents/runner.ts` handles sub-agent execution. `analysis/` is a self-contained subsystem with its own CLI entry; `analysis/capture.ts` is the only file `extension.ts` reaches into directly. `commands/` depends on `agents/templates.ts` (for template grouping). `extension.ts` is the hub that wires everything together.
@@ -149,7 +171,10 @@ No circular dependencies. `lsp/`, `web/`, `prompt/`, and `utils/` are independen
 - ES modules with `.js` extensions in imports (even for `.ts` sources)
 - `@sinclair/typebox` for tool parameter schemas
 - Use `Model<any>` (not `Model<unknown>`) for pi SDK model types
-- Assets (defaults.json, templates) copied to `dist/` by `scripts/copy-assets.ts`
+- Assets copied to `dist/` by `scripts/copy-assets.ts`: `defaults.json`, agent + command templates, `scripts/parse-session.py` (for `read-session` slash command), and `prompt/system-prompt.source.ts` (for propose-mode fallback grounding when no captures exist)
+- Slash command templates in `src/commands/templates/*.md` may use `$EXTENSION_DIST` to reference the extension's compiled `dist/` directory; `commands/registry.ts` substitutes the absolute path at command-expansion time. Always shell-quote the substituted path so install paths with spaces still work.
+- `package.json#files` is an explicit allowlist (`dist/`, `README.md`, `LICENSE`); without it npm pack would gitignore-exclude `dist/` and ship a broken package. The foreign-install test pins this contract.
 - Config files at `.pi/code-intel.json` (project) and `.pi/lsp.json` (LSP overrides). Sections: `lsp`, `agents`, `prompt`, `web`, `context7` — each with `enabled: boolean`. Plus `analysis: { captureSystemPrompt: boolean }` for the session-analysis tooling.
-- All bash commands routed through RTK for token-optimized output — no dedicated grep/find/ls tools
+- All bash commands routed through RTK for token-optimized output — no dedicated grep/find/ls tools. The `rtkSpawnHook` tolerates exit codes other than 0/1 when stdout has content (rtk 0.39+ emits a deprecation warning with exit 3 alongside valid output).
+- Pinned external binaries: `@upstash/context7-mcp@^2.2.4` (in `src/web/context7.ts`), `rtk@v0.39.0` (in `.github/workflows/ci.yml`). Both protected by integration tests.
 - Dependency: `@mariozechner/pi-coding-agent ^0.62.0`

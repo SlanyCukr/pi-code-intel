@@ -139,11 +139,17 @@ Create `.pi/lsp.json` to override or add language server configs:
 
 ```bash
 npm install
-npm run build     # Compile + copy assets
-npm run typecheck  # Type check without emitting
-npm test          # Run tests
-npm run dev       # Watch mode
+npm run build      # Compile + copy assets
+npm run typecheck   # Type check without emitting
+npm test           # Run unit tests (fast)
+npm run dev        # Watch mode
+
+# Integration tests (slower; not part of `npm test`)
+npm run smoke         # Real Context7 MCP smoke test (network required)
+npm run test:foreign  # Pack + install into temp project + run analyzer end-to-end
 ```
+
+All three test categories run in CI on every push (`.github/workflows/ci.yml`).
 
 ## Architecture
 
@@ -152,6 +158,11 @@ src/
 ├── extension.ts          # Entry point — registers all tools and hooks
 ├── config.ts             # Project config loading (.pi/code-intel.json)
 ├── types.ts              # Shared `AnyModel = Model<any>` alias
+├── isolated-session.ts   # Single boundary for one-off LLM calls (propose, summarizer)
+├── rtk.ts                # Bash spawn hook that routes commands through `rtk rewrite`
+├── commands/
+│   ├── registry.ts       # Slash command registration; expands `$EXTENSION_DIST` to extension's dist path
+│   └── templates/        # Slash command markdown templates
 ├── lsp/
 │   ├── client.ts         # LSP client manager (JSON-RPC over stdio)
 │   ├── config.ts         # Server auto-discovery and config merging
@@ -173,17 +184,19 @@ src/
 │   ├── code-exploration.ts  # LSP-focused code exploration guidance
 │   └── system-prompt.ts     # Code intelligence workflow prompt
 └── analysis/
-    ├── capture.ts            # `before_agent_start` hook that persists rendered system prompt
-    ├── cli.ts                # CLI orchestration
+    ├── capture.ts            # `before_agent_start` hook that persists rendered system prompt; resets dedupe on session_switch + session_fork
+    ├── cli.ts                # CLI orchestration; uses SDK getAgentDir() to honor $PI_CODING_AGENT_DIR
     ├── cli-main.ts           # Executable entry point (built to dist/analysis/cli-main.js)
     ├── reader.ts             # Session JSONL parser → typed AnalysisEvent stream
     ├── metrics.ts            # Per-session and aggregated metrics
     ├── patterns/             # Anti-pattern rule registry (one rule per file)
-    ├── outcomes.ts           # Git-correlation: commits-in-window, revert detection
+    ├── outcomes.ts           # Git-correlation via `git rev-parse --is-inside-work-tree` + log
     ├── propose.ts            # LLM-driven prompt-amendment proposals
     ├── report.ts             # Markdown renderer
     └── types.ts              # AnalysisEvent + AntiPatternHit + ParsedSession
 ```
+
+Build output (`dist/`) is shipped via `package.json#files`; the foreign-install integration test asserts the published tarball contains the analyzer entry, `scripts/parse-session.py`, the bundled `prompt/system-prompt.source.ts` (propose-mode fallback), and `LICENSE`.
 
 ## License
 
