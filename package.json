@@ -17,7 +17,8 @@
 		"dev": "tsc -p tsconfig.build.json --watch",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"smoke": "npm run build && node --experimental-strip-types scripts/mcp-smoke-test.ts"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "^0.34.0",
