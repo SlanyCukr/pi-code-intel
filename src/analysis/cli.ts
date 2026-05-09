@@ -40,7 +40,7 @@ export interface AnalysisArgs {
 	out?: string;
 	/** When true, only print to stdout; do not write to disk. */
 	noWrite?: boolean;
-	/** Phase 6 — request the propose section. Currently a stub. */
+	/** When true, run the LLM-driven proposer and render section 5. */
 	propose?: boolean;
 }
 
@@ -306,8 +306,9 @@ export function defaultReportPath(cwd: string, now: Date = new Date()): string {
 
 /**
  * Parse a duration string like `7d`, `24h`, `30m`, `2w` into ms.
- * Returns null on unrecognized input — the CLI treats null as "no
- * filter" rather than throwing, so a typo doesn't abort a run.
+ * Returns null on unrecognized input. The CLI treats null as a hard
+ * error and exits 2 so a typo cannot silently expand the analysis
+ * window to "all sessions" (see `cli-main.ts` --since handling).
  */
 export function parseDuration(s: string): number | null {
 	const m = s.trim().match(/^(\d+)\s*([smhdw])$/i);

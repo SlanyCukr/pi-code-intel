@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { runIsolatedTextCall } from "../utils/isolated-text-call.js";
 import type { AnyModel } from "../types.js";
-import { lastAssistantText } from "../utils/agent-messages.js";
 import { formatPercent, formatRatio } from "./format.js";
 import type { AggregatedMetrics, SessionMetrics } from "./metrics.js";
 import type { AntiPatternHit, ParsedSession } from "./types.js";
@@ -164,10 +163,6 @@ export function buildProposalPrompt(input: BuildProposalPromptInput): string {
 		(a, b) => byRule.get(b)!.length - byRule.get(a)!.length,
 	);
 	let included = 0;
-	// ruleIds.length >= 1 inside this loop, so the Math.max(1, ruleIds.length)
-	// guard the prior code carried is dead — the only divide-by-zero risk is
-	// when topK is below ruleIds.length, which Math.floor turns into 0; the
-	// outer Math.max(1, ...) keeps the slice cap at >=1.
 	for (const id of ruleIds) {
 		const hits = byRule.get(id)!;
 		lines.push(`### \`${id}\` — ${hits.length} hit${hits.length === 1 ? "" : "s"}`);
@@ -284,13 +279,6 @@ export async function generateProposals(
 		? result.text + footer
 		: result.text + "\n\n" + footer;
 }
-
-/**
- * Pull the last assistant message text out of a session's message log.
- * Re-exported for the proposal flow's null-on-miss contract; see
- * `lastAssistantText` for the shared implementation.
- */
-export const extractLastAssistantText = lastAssistantText;
 
 function renderGroundingFooter(grounding: ProposalGrounding): string {
 	if (grounding.kind === "captured") {

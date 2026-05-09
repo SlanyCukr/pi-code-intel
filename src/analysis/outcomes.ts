@@ -116,33 +116,23 @@ export function correlateOutcomes(
 	try {
 		userEmail = runGit(["config", "user.email"], cwd).trim();
 	} catch (err) {
-		return {
-			sessionId: session.header.id,
-			cwd,
-			windowStart: start,
-			windowEnd: end,
-			gitUnavailable: true,
-			gitUnavailableReason: `git config user.email failed: ${
-				err instanceof Error ? err.message : String(err)
-			}`,
-			commitsInWindow: [],
-			revertedShas: [],
+		return unavailable(
+			session,
+			start,
+			end,
 			lastToolWasError,
-		};
+			`git config user.email failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
 	}
 
 	if (!userEmail) {
-		return {
-			sessionId: session.header.id,
-			cwd,
-			windowStart: start,
-			windowEnd: end,
-			gitUnavailable: true,
-			gitUnavailableReason: "git config user.email is empty",
-			commitsInWindow: [],
-			revertedShas: [],
+		return unavailable(
+			session,
+			start,
+			end,
 			lastToolWasError,
-		};
+			"git config user.email is empty",
+		);
 	}
 
 	let commitsInWindow: OutcomeData["commitsInWindow"] = [];

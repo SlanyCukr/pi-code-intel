@@ -325,33 +325,23 @@ export class LspClientManager {
 		this.startMessageReader(client);
 
 		// Identity guard on the map deletion: when init fails we kill the child,
-		// but `exit` fires asynchronously — a retry may have already registered a
-		// new client under the same name. Don't erase it.
+		// but `exit`/`error` fire asynchronously — a retry may have already
+		// registered a new client under the same name. Don't erase it.
+		const tearDown = (cause: Error): void => {
+			for (const [, req] of client.pendingRequests) {
+				if (req.timer) clearTimeout(req.timer);
+				req.reject(cause);
+			}
+			client.pendingRequests.clear();
+			if (this.clients.get(serverName) === client) {
+				this.clients.delete(serverName);
+			}
+		};
 		child.on("exit", (code) => {
-			// Reject all pending requests
-			for (const [, req] of client.pendingRequests) {
-				if (req.timer) clearTimeout(req.timer);
-				req.reject(
-					new Error(
-						`LSP server ${serverName} exited with code ${code}`,
-					),
-				);
-			}
-			client.pendingRequests.clear();
-			if (this.clients.get(serverName) === client) {
-				this.clients.delete(serverName);
-			}
+			tearDown(new Error(`LSP server ${serverName} exited with code ${code}`));
 		});
-
 		child.on("error", (err) => {
-			for (const [, req] of client.pendingRequests) {
-				if (req.timer) clearTimeout(req.timer);
-				req.reject(err);
-			}
-			client.pendingRequests.clear();
-			if (this.clients.get(serverName) === client) {
-				this.clients.delete(serverName);
-			}
+			tearDown(err);
 		});
 
 		// Send initialize request — kill child if init fails

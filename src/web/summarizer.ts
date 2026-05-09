@@ -40,9 +40,11 @@ Provide a concise response based on the content above. Include relevant details,
  *
  * For small content (<=30K chars), returns the markdown directly.
  * For larger content, runs a single-turn isolated agent session (no
- * tools) via `runIsolatedTextCall`. Aborts throw; an empty model
- * response degrades to truncated raw content rather than failing the
- * whole web fetch.
+ * tools) via `runIsolatedTextCall`. Aborts (any phase), empty-output,
+ * and thrown errors all degrade to truncated raw content with a status
+ * note — matching `analysis/propose.ts`, the fetch tool always returns
+ * markdown so a cancelled or failed summarize never aborts the whole
+ * tool call.
  */
 export async function summarizeContent(options: SummarizeOptions): Promise<string> {
 	const { content, prompt, cwd, model, signal } = options;
@@ -51,21 +53,28 @@ export async function summarizeContent(options: SummarizeOptions): Promise<strin
 		return content;
 	}
 
-	const result = await runIsolatedTextCall(
-		buildExtractionPrompt(content, prompt),
-		{ cwd, model, signal },
-	);
-
-	if (result.kind === "aborted") {
-		throw new Error("Summarization aborted");
+	let reason: string;
+	try {
+		const result = await runIsolatedTextCall(
+			buildExtractionPrompt(content, prompt),
+			{ cwd, model, signal },
+		);
+		if (result.kind === "text") return result.text;
+		reason = result.kind === "aborted" ? "aborted" : "produced no output";
+	} catch (err) {
+		// During-prompt aborts surface here as a thrown rejection from
+		// session.abort() resolving prompt(); other failures (model error,
+		// network) take the same path. Both fall through to the markdown
+		// fallback so the fetch tool stays consumable.
+		reason =
+			err instanceof Error && /abort/i.test(err.message)
+				? "aborted"
+				: `failed: ${err instanceof Error ? err.message : String(err)}`;
 	}
-	if (result.kind === "text") return result.text;
 
-	console.error(
-		"[code-intel] Web content summarization produced no text output from model, returning truncated raw content",
-	);
+	console.error(`[code-intel] Web content summarization fallback: ${reason}`);
 	return (
 		content.slice(0, SMALL_CONTENT_THRESHOLD) +
-		"\n\n[Content summarization produced no output, showing truncated raw content]"
+		`\n\n[Content summarization ${reason}, showing truncated raw content]`
 	);
 }

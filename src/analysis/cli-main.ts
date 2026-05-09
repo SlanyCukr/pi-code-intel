@@ -86,7 +86,8 @@ function printHelp(stream: NodeJS.WritableStream): void {
 	stream.write(`Usage: analyze-sessions [options]
 
 Analyze pi-coding-agent session JSONL logs for code-search efficiency,
-recurring anti-patterns, and (later) outcomes / prompt-amendment proposals.
+recurring anti-patterns, git outcome correlation, and (with --propose)
+LLM-driven prompt-amendment proposals.
 
 Options:
   --cwd <path>          Working directory whose sessions to analyze.

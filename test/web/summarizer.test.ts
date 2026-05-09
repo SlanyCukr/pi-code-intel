@@ -74,7 +74,7 @@ describe("summarizeContent", () => {
 		expect(mockSession.dispose).toHaveBeenCalled();
 	});
 
-	it("disposes session even on error", async () => {
+	it("returns fallback markdown on model error and still disposes the session", async () => {
 		const largeContent = "x".repeat(40_000);
 		const mockSession = {
 			agent: { setSystemPrompt: vi.fn() },
@@ -88,35 +88,33 @@ describe("summarizeContent", () => {
 			extensionsResult: { extensions: [], errors: [], runtime: 0 as any },
 		});
 
-		await expect(
-			summarizeContent({
-				content: largeContent,
-				prompt: "extract",
-				cwd: "/tmp",
-			}),
-		).rejects.toThrow("model error");
+		const result = await summarizeContent({
+			content: largeContent,
+			prompt: "extract",
+			cwd: "/tmp",
+		});
 
+		expect(result).toContain("[Content summarization failed: model error");
 		expect(mockSession.dispose).toHaveBeenCalled();
 	});
 
-	it("throws immediately if signal is already aborted (no createAgentSession)", async () => {
+	it("returns fallback markdown if signal is already aborted (no createAgentSession)", async () => {
 		const largeContent = "x".repeat(40_000);
 		const controller = new AbortController();
 		controller.abort();
 
-		await expect(
-			summarizeContent({
-				content: largeContent,
-				prompt: "extract",
-				cwd: "/tmp",
-				signal: controller.signal,
-			}),
-		).rejects.toThrow(/aborted/);
+		const result = await summarizeContent({
+			content: largeContent,
+			prompt: "extract",
+			cwd: "/tmp",
+			signal: controller.signal,
+		});
 
+		expect(result).toContain("[Content summarization aborted");
 		expect(mockCreateSession).not.toHaveBeenCalled();
 	});
 
-	it("swallows session.abort() rejections so a fired abort cannot crash the process", async () => {
+	it("returns fallback markdown on during-prompt abort and disposes the session", async () => {
 		const largeContent = "x".repeat(40_000);
 		// `prompt()` never resolves on its own; only the abort handler can end it.
 		let rejectPrompt: ((err: Error) => void) | undefined;
@@ -156,7 +154,8 @@ describe("summarizeContent", () => {
 		await new Promise((r) => setImmediate(r));
 		controller.abort();
 
-		await expect(pending).rejects.toThrow("prompt aborted");
+		const result = await pending;
+		expect(result).toContain("[Content summarization aborted");
 		expect(mockSession.abort).toHaveBeenCalled();
 		expect(mockSession.dispose).toHaveBeenCalled();
 	});
@@ -181,6 +180,6 @@ describe("summarizeContent", () => {
 			cwd: "/tmp",
 		});
 
-		expect(result).toContain("[Content summarization produced no output");
+		expect(result).toContain("[Content summarization produced no output,");
 	});
 });

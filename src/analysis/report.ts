@@ -7,10 +7,10 @@ import type { OutcomeData } from "./outcomes.js";
 import type { AntiPatternHit } from "./types.js";
 
 /**
- * Inputs to the markdown renderer. Sections that aren't ready for this
- * phase (proposals) are passed as `undefined` and rendered as a
- * placeholder; sections that *were* requested but yielded nothing
- * render `(no findings)` so empty-vs-skipped stays distinguishable.
+ * Inputs to the markdown renderer. Optional sections (`outcomesBySession`,
+ * `proposalsMarkdown`) render as a "not requested" placeholder when
+ * `undefined`; sections that *were* requested but yielded nothing render
+ * `(no findings)` so empty-vs-skipped stays distinguishable.
  */
 export interface RenderInput {
 	generatedAt: Date;
@@ -18,7 +18,7 @@ export interface RenderInput {
 	aggregated: AggregatedMetrics;
 	/** Map session id → hits found in that session. */
 	hitsBySession: Map<string, AntiPatternHit[]>;
-	/** Section 4 — keyed by sessionId. Optional: omitted when phase 5 is disabled. */
+	/** Section 4 — keyed by sessionId. Optional: omitted when outcome correlation is disabled. */
 	outcomesBySession?: Map<string, OutcomeData>;
 	/**
 	 * Section 5 — a complete markdown block produced by
@@ -254,10 +254,7 @@ function renderProposals(input: RenderInput): string {
 	return lines.join("\n");
 }
 
-/**
- * Format a ratio for the markdown table. `null` becomes `n/a` so the
- * cell reads cleanly when the denominator was zero.
- */
+/** Local-time `YYYY-MM-DD` for the report header timestamp. */
 function formatDate(d: Date): string {
 	const yyyy = d.getFullYear();
 	const mm = String(d.getMonth() + 1).padStart(2, "0");

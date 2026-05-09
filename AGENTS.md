@@ -155,12 +155,13 @@ agents/templates.ts → utils/frontmatter.ts, utils/templates.ts
 analysis/cli-main.ts → analysis/cli.ts → analysis/{reader, metrics, patterns/*, outcomes, propose, report}.ts
 analysis/cli.ts → @mariozechner/pi-coding-agent (getAgentDir for $PI_CODING_AGENT_DIR)
 analysis/capture.ts (self-contained pi hook + customType constant; consumed by reader.ts)
-analysis/propose.ts → types.ts (AnyModel) + isolated-session.ts + utils/agent-messages.ts
-isolated-session.ts (single boundary for one-off LLM calls; consumed by propose.ts and web/summarizer.ts)
+analysis/propose.ts → types.ts (AnyModel) + utils/isolated-text-call.ts
+utils/isolated-text-call.ts → isolated-session.ts + utils/agent-messages.ts (shared abort/lifecycle helper for one-off LLM calls; consumed by propose.ts and web/summarizer.ts)
+isolated-session.ts (single boundary for createAgentSession; consumed by utils/isolated-text-call.ts)
 commands/registry.ts → agents/templates.ts, utils/frontmatter.ts, utils/templates.ts (exposes $EXTENSION_DIST substitution)
 lsp/tool.ts → lsp/client.ts → lsp/config.ts, lsp/utils.ts, lsp/types.ts
 web/tool.ts → web/fetch.ts, web/summarizer.ts
-web/summarizer.ts → types.ts, isolated-session.ts, utils/agent-messages.ts
+web/summarizer.ts → types.ts, utils/isolated-text-call.ts
 web/context7.ts (self-contained MCP client + tool definition; CONTEXT7_MCP_VERSION pin)
 ```
 

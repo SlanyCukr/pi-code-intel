@@ -167,7 +167,13 @@ async function setupFileContext(
 }
 
 function requirePosition(input: LspInput, filePath: string): Position {
-	if (!input.line) throw new Error(`line is required for ${input.action}`);
+	if (
+		input.line === undefined ||
+		!Number.isFinite(input.line) ||
+		input.line < 1
+	) {
+		throw new Error(`line is required for ${input.action} (1-based)`);
+	}
 	return resolveSymbolPosition(filePath, input.line, input.symbol);
 }
 
