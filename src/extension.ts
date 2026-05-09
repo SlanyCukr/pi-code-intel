@@ -18,7 +18,7 @@ import { registerCommands } from "./commands/registry.js";
 import { buildSystemPrompt } from "./prompt/system-prompt.js";
 import { requireRtk, rtkSpawnHook } from "./rtk.js";
 import { createFetchTool } from "./web/tool.js";
-import { createContext7Tool, type Context7Client } from "./web/context7.js";
+import { createContext7Tool } from "./web/context7.js";
 
 /**
  * Pi extension entry point.
@@ -104,12 +104,13 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	let lspTool = null;
 	if (config.lsp.enabled) {
 		const lspConfig = loadLspConfig(cwd);
-		lspManager = LspClientManager.getInstance(lspConfig, cwd);
-		lspTool = createLspTool(lspManager, cwd);
+		const manager = LspClientManager.getInstance(lspConfig, cwd);
+		lspManager = manager;
+		lspTool = createLspTool(manager, cwd);
 		pi.registerTool(lspTool);
-		cleanupFns.push(() => lspManager!.release());
+		cleanupFns.push(() => manager.release());
 		// Start detected servers in background so they can index the workspace
-		lspManager.warmup().catch((err) => {
+		manager.warmup().catch((err) => {
 			console.error(
 				"[code-intel] LSP warmup failed:",
 				err instanceof Error ? err.message : err,
@@ -125,14 +126,12 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	}
 
 	// 4. Context7 library docs tool
-	let context7Client: Context7Client | null = null;
 	let context7Tool: ReturnType<typeof createContext7Tool>["tool"] | null = null;
 	if (config.context7.enabled) {
-		const context7Result = createContext7Tool();
-		context7Tool = context7Result.tool;
-		pi.registerTool(context7Result.tool);
-		context7Client = context7Result.client;
-		cleanupFns.push(async () => context7Client!.stop());
+		const { tool, client } = createContext7Tool();
+		context7Tool = tool;
+		pi.registerTool(tool);
+		cleanupFns.push(async () => client.stop());
 	}
 
 	// 5. Sub-agent subsystem
