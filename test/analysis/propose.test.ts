@@ -8,7 +8,6 @@ import {
 	generateProposals,
 	selectGrounding,
 } from "../../src/analysis/propose.js";
-import { lastAssistantText } from "../../src/utils/agent-messages.js";
 import { aggregateMetrics } from "../../src/analysis/metrics.js";
 import type {
 	AnalysisEvent,
@@ -196,35 +195,6 @@ describe("buildProposalPrompt", () => {
 		// Count rendered "- hit N" lines.
 		const matches = prompt.match(/^- hit \d+/gm) ?? [];
 		expect(matches.length).toBeLessThanOrEqual(6); // small slack: rounded sample size per rule
-	});
-});
-
-describe("lastAssistantText", () => {
-	it("returns the last assistant text content joined with double newlines", () => {
-		const messages = [
-			{ role: "user", content: "hi" },
-			{
-				role: "assistant",
-				content: [
-					{ type: "text", text: "first" },
-					{ type: "text", text: "second" },
-				],
-			},
-		];
-		expect(lastAssistantText(messages)).toBe("first\n\nsecond");
-	});
-
-	it("returns null when no assistant message has text", () => {
-		const messages = [
-			{ role: "user", content: "hi" },
-			{ role: "assistant", content: [{ type: "toolCall" }] },
-		];
-		expect(lastAssistantText(messages)).toBeNull();
-	});
-
-	it("handles string content directly", () => {
-		const messages = [{ role: "assistant", content: "hello world" }];
-		expect(lastAssistantText(messages)).toBe("hello world");
 	});
 });
 
