@@ -133,119 +133,130 @@ export function createLspTool(
 	};
 }
 
+type LspClient = NonNullable<
+	Awaited<ReturnType<LspClientManager["getClientForFile"]>>
+>;
+
+interface FileContext {
+	client: LspClient;
+	filePath: string;
+	uri: string;
+}
+
+const DIAGNOSTICS_SETTLE_MS = 500;
+
+/**
+ * Resolve the file path, get the LSP client, and (optionally) sync the file.
+ * Throws if `input.file` is missing — schema guarantees a string when present,
+ * so callers only need to gate by action. Returns `null` when no LSP server
+ * is available for the file (caller should surface a user-facing message).
+ */
+async function setupFileContext(
+	manager: LspClientManager,
+	cwd: string,
+	input: LspInput,
+	signal: AbortSignal | undefined,
+	options: { sync: boolean },
+): Promise<FileContext | null> {
+	if (!input.file) throw new Error(`file is required for ${input.action}`);
+	const filePath = resolve(cwd, input.file);
+	const client = await manager.getClientForFile(filePath, signal);
+	if (!client) return null;
+	if (options.sync) await manager.syncFile(client, filePath);
+	return { client, filePath, uri: fileToUri(filePath) };
+}
+
+function requirePosition(input: LspInput, filePath: string): Position {
+	if (!input.line) throw new Error(`line is required for ${input.action}`);
+	return resolveSymbolPosition(filePath, input.line, input.symbol);
+}
+
 async function executeLspAction(
 	manager: LspClientManager,
 	cwd: string,
 	input: LspInput,
 	signal?: AbortSignal,
 ): Promise<string> {
-	const { action } = input;
+	switch (input.action) {
+		case "status": {
+			const servers = manager.getActiveServers();
+			if (servers.length === 0) return "No LSP servers are currently running.";
+			return `Active LSP servers:\n${servers.map((s) => `  - ${s}`).join("\n")}`;
+		}
 
-	// Actions that don't need a file
-	if (action === "status") {
-		const servers = manager.getActiveServers();
-		if (servers.length === 0) return "No LSP servers are currently running.";
-		return `Active LSP servers:\n${servers.map((s) => `  - ${s}`).join("\n")}`;
-	}
+		case "reload": {
+			await manager.restart();
+			return "All LSP servers have been shut down and cached state cleared. They will be re-spawned on the next tool call.";
+		}
 
-	if (action === "reload") {
-		await manager.restart();
-		return "All LSP servers have been shut down and cached state cleared. They will be re-spawned on the next tool call.";
-	}
+		case "workspace_symbols": {
+			if (!input.query) throw new Error("query is required for workspace_symbols");
+			// workspace_symbols is workspace-scoped; the file just selects the LSP
+			// server, so skip the textDocument sync that the per-file actions need.
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: false });
+			if (!ctx) return `No LSP server available for ${input.file}`;
+			const symbols = (await manager.sendRequest(
+				ctx.client,
+				"workspace/symbol",
+				{ query: input.query },
+				signal,
+			)) as SymbolInformation[] | null;
+			return formatWorkspaceSymbols(symbols ?? [], cwd);
+		}
 
-	if (action === "workspace_symbols") {
-		if (!input.query) throw new Error("query is required for workspace_symbols");
-		if (!input.file)
-			throw new Error("file is required for workspace_symbols (to determine which LSP server to use)");
-		const absFile = resolve(cwd, input.file);
-		const client = await manager.getClientForFile(absFile, signal);
-		if (!client) return `No LSP server available for ${input.file}`;
-
-		const symbols = (await manager.sendRequest(
-			client,
-			"workspace/symbol",
-			{ query: input.query },
-			signal,
-		)) as SymbolInformation[] | null;
-
-		return formatWorkspaceSymbols(symbols ?? [], cwd);
-	}
-
-	// All other actions need a file
-	if (!input.file) throw new Error(`file is required for ${action}`);
-	const filePath = resolve(cwd, input.file);
-
-	const client = await manager.getClientForFile(filePath, signal);
-	if (!client) return `No LSP server available for ${input.file}`;
-
-	// Sync the file before making requests
-	await manager.syncFile(client, filePath);
-
-	const uri = fileToUri(filePath);
-
-	// Position-based actions share the same setup
-	const POSITION_ACTIONS = new Set([
-		"hover", "definition", "type_definition", "implementation",
-		"references", "incoming_calls", "outgoing_calls", "rename", "code_actions",
-	]);
-
-	let pos: Position | undefined;
-	if (POSITION_ACTIONS.has(action)) {
-		if (!input.line) throw new Error(`line is required for ${action}`);
-		pos = resolveSymbolPosition(filePath, input.line, input.symbol);
-	}
-
-	const DIAGNOSTICS_SETTLE_MS = 500;
-
-	switch (action) {
 		case "diagnostics": {
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
 			await new Promise((r) => setTimeout(r, DIAGNOSTICS_SETTLE_MS));
-			const diags = manager.getDiagnostics(client, filePath);
-			return formatDiagnostics(diags, cwd);
+			return formatDiagnostics(manager.getDiagnostics(ctx.client, ctx.filePath), cwd);
 		}
 
 		case "document_symbols": {
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
 			const symbols = (await manager.sendRequest(
-				client,
+				ctx.client,
 				"textDocument/documentSymbol",
-				{ textDocument: { uri } },
+				{ textDocument: { uri: ctx.uri } },
 				signal,
 			)) as DocumentSymbol[] | null;
-
 			return formatDocumentSymbols(symbols ?? []);
 		}
 
 		case "hover": {
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
+			const pos = requirePosition(input, ctx.filePath);
 			const hover = (await manager.sendRequest(
-				client,
+				ctx.client,
 				"textDocument/hover",
-				{ textDocument: { uri }, position: pos! },
+				{ textDocument: { uri: ctx.uri }, position: pos },
 				signal,
 			)) as Hover | null;
-
 			return formatHover(hover);
 		}
 
 		case "definition":
 		case "type_definition":
 		case "implementation": {
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
+			const pos = requirePosition(input, ctx.filePath);
 			const methodMap = {
 				definition: "textDocument/definition",
 				type_definition: "textDocument/typeDefinition",
 				implementation: "textDocument/implementation",
 			};
-
 			const result = (await manager.sendRequest(
-				client,
-				methodMap[action],
-				{ textDocument: { uri }, position: pos! },
+				ctx.client,
+				methodMap[input.action],
+				{ textDocument: { uri: ctx.uri }, position: pos },
 				signal,
 			)) as Location | Location[] | LocationLink[] | null;
 
 			if (!result) return "No results found.";
 			const locations = Array.isArray(result) ? result : [result];
 			if (locations.length === 0) return "No results found.";
-
 			if (locations.length <= 5) {
 				return locations
 					.map((loc) => formatLocationWithContext(loc, cwd))
@@ -255,103 +266,102 @@ async function executeLspAction(
 		}
 
 		case "references": {
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
+			const pos = requirePosition(input, ctx.filePath);
 			const refs = (await manager.sendRequest(
-				client,
+				ctx.client,
 				"textDocument/references",
 				{
-					textDocument: { uri },
-					position: pos!,
+					textDocument: { uri: ctx.uri },
+					position: pos,
 					context: { includeDeclaration: true },
 				},
 				signal,
 			)) as Location[] | null;
-
 			return formatLocations(refs ?? [], cwd);
 		}
 
 		case "incoming_calls":
 		case "outgoing_calls": {
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
+			const pos = requirePosition(input, ctx.filePath);
 			const items = (await manager.sendRequest(
-				client,
+				ctx.client,
 				"textDocument/prepareCallHierarchy",
-				{ textDocument: { uri }, position: pos! },
+				{ textDocument: { uri: ctx.uri }, position: pos },
 				signal,
 			)) as CallHierarchyItem[] | null;
-
 			if (!items || items.length === 0)
 				return "Could not resolve call hierarchy at this location.";
-
 			const item = items[0];
-
 			const callMethodMap = {
 				incoming_calls: "callHierarchy/incomingCalls",
 				outgoing_calls: "callHierarchy/outgoingCalls",
 			} as const;
 			const calls = (await manager.sendRequest(
-				client,
-				callMethodMap[action],
+				ctx.client,
+				callMethodMap[input.action],
 				{ item },
 				signal,
 			)) as (CallHierarchyIncomingCall | CallHierarchyOutgoingCall)[] | null;
-
-			if (action === "incoming_calls") {
+			if (input.action === "incoming_calls") {
 				return `Incoming calls to ${item.name}:\n${formatCallHierarchyIncoming((calls ?? []) as CallHierarchyIncomingCall[], cwd)}`;
-			} else {
-				return `Outgoing calls from ${item.name}:\n${formatCallHierarchyOutgoing((calls ?? []) as CallHierarchyOutgoingCall[], cwd)}`;
 			}
+			return `Outgoing calls from ${item.name}:\n${formatCallHierarchyOutgoing((calls ?? []) as CallHierarchyOutgoingCall[], cwd)}`;
 		}
 
 		case "rename": {
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
+			const pos = requirePosition(input, ctx.filePath);
 			if (!input.new_name) throw new Error("new_name is required for rename");
-
 			const edit = (await manager.sendRequest(
-				client,
+				ctx.client,
 				"textDocument/rename",
 				{
-					textDocument: { uri },
-					position: pos!,
+					textDocument: { uri: ctx.uri },
+					position: pos,
 					newName: input.new_name,
 				},
 				signal,
 			)) as WorkspaceEdit | null;
-
 			if (!edit) return "Rename not supported at this location.";
-
 			let fileCount = 0;
 			if (edit.changes) {
 				fileCount = Object.keys(edit.changes).length;
 			} else if (edit.documentChanges) {
 				fileCount = edit.documentChanges.length;
 			}
-
 			return `Rename would affect ${fileCount} file(s). Note: The rename edit was computed but not applied. Use the edit tool to apply changes manually.`;
 		}
 
 		case "code_actions": {
-			const fileDiags = manager.getDiagnostics(client, filePath);
+			const ctx = await setupFileContext(manager, cwd, input, signal, { sync: true });
+			if (!ctx) return `No LSP server available for ${input.file}`;
+			const pos = requirePosition(input, ctx.filePath);
+			const fileDiags = manager.getDiagnostics(ctx.client, ctx.filePath);
 			const lineDiags: Diagnostic[] = [];
 			for (const diags of fileDiags.values()) {
 				for (const d of diags) {
-					if (d.range.start.line === pos!.line) {
+					if (d.range.start.line === pos.line) {
 						lineDiags.push(d);
 					}
 				}
 			}
-
 			const actions = (await manager.sendRequest(
-				client,
+				ctx.client,
 				"textDocument/codeAction",
 				{
-					textDocument: { uri },
-					range: { start: pos!, end: pos! },
+					textDocument: { uri: ctx.uri },
+					range: { start: pos, end: pos },
 					context: { diagnostics: lineDiags },
 				},
 				signal,
 			)) as CodeAction[] | null;
-
 			if (!actions || actions.length === 0)
 				return "No code actions available at this location.";
-
 			return actions
 				.map((a, i) => {
 					const kind = a.kind ? ` [${a.kind}]` : "";
@@ -360,8 +370,5 @@ async function executeLspAction(
 				})
 				.join("\n");
 		}
-
-		default:
-			return `Unknown action: ${action}`;
 	}
 }

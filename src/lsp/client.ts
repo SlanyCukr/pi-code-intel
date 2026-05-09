@@ -693,17 +693,21 @@ export class LspClientManager {
 	/**
 	 * Get diagnostics from a client's cache. Returns diagnostics for a specific file, or all cached diagnostics if filePath is omitted.
 	 * filePath must be an absolute path when provided.
+	 *
+	 * Always returns a fresh `Map` snapshot — the returned map will not
+	 * mutate when later `textDocument/publishDiagnostics` notifications
+	 * arrive on the client. The diagnostic arrays themselves are still
+	 * shared references (cheap copy), which is fine because the LSP
+	 * message handler replaces a file's array wholesale rather than
+	 * mutating it in place.
 	 */
 	getDiagnostics(client: LspClient, filePath?: string): Map<string, Diagnostic[]> {
 		if (filePath) {
 			const uri = fileToUri(filePath);
 			const diags = client.diagnostics.get(uri);
-			if (diags) {
-				return new Map([[uri, diags]]);
-			}
-			return new Map();
+			return diags ? new Map([[uri, diags]]) : new Map();
 		}
-		return client.diagnostics;
+		return new Map(client.diagnostics);
 	}
 
 	/**
@@ -784,4 +788,19 @@ export class LspClientManager {
 		this.clients.clear();
 		this.warmedUp = false;
 	}
+}
+
+/**
+ * Test-only: drop the process-level `managerInstances` cache without
+ * touching live LSP processes.
+ *
+ * Tests that exercise `LspClientManager.getInstance` for a given cwd and
+ * forget to call `release()` would leak the singleton — and any later
+ * test reusing that cwd would get the leaked instance plus its still-
+ * spawned LSP processes. Mirrors `resetTemplateCache` (templates.ts) and
+ * `clearCache` (web/fetch.ts). Production code never calls this — `release()`
+ * is the production cleanup path.
+ */
+export function resetLspManagerCache(): void {
+	managerInstances.clear();
 }
