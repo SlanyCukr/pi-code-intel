@@ -53,6 +53,19 @@ export interface AnalysisResult {
 }
 
 /**
+ * Runtime options separate from operator-supplied `AnalysisArgs`.
+ *
+ * `signal` is intentionally NOT in `AnalysisArgs`: the latter is the
+ * shape of CLI/operator input, parsed from argv. The signal is a
+ * caller-side cancellation handle that flows in alongside, matching the
+ * `(input, options)` shape used by `generateProposals` and `runSubAgent`.
+ */
+export interface AnalysisOptions {
+	/** Aborts the in-flight propose-mode LLM call when triggered. */
+	signal?: AbortSignal;
+}
+
+/**
  * Run the full analysis pipeline end-to-end.
  *
  * Steps:
@@ -71,8 +84,17 @@ export interface AnalysisResult {
  * Step 6 is async (LLM call) — that's why this function is now async.
  * The propose step only runs when `args.propose === true`; otherwise
  * the function is effectively still synchronous.
+ *
+ * `options.signal`, when provided, aborts the propose-mode LLM call.
+ * The synchronous parts (file enumeration, parsing, metrics, outcome
+ * correlation) are not signal-aware — they complete or throw on their
+ * own. This matches how `generateProposals` already exposes signal
+ * handling and is the only step that can stall on remote IO.
  */
-export async function runAnalysis(args: AnalysisArgs): Promise<AnalysisResult> {
+export async function runAnalysis(
+	args: AnalysisArgs,
+	options: AnalysisOptions = {},
+): Promise<AnalysisResult> {
 	// Always resolve cwd to an absolute path: pi stores absolute cwds in
 	// its session subdirectory names, so a relative input like "." or
 	// "./proj" would be encoded as `--.--` / `--.-proj--` and find no
@@ -129,6 +151,7 @@ export async function runAnalysis(args: AnalysisArgs): Promise<AnalysisResult> {
 			},
 			{
 				cwd: args.cwd,
+				signal: options.signal,
 			},
 		);
 	}

@@ -9,6 +9,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// Mock the isolation helper so propose-mode tests don't actually spawn
+// an LLM session. Existing non-propose tests don't trigger this mock.
+vi.mock("../../src/isolated-session.js", () => ({
+	createIsolatedSession: vi.fn(),
+}));
+
 import {
 	defaultReportPath,
 	encodeSessionDirName,
@@ -17,6 +23,9 @@ import {
 	resolveSystemPromptFallback,
 	runAnalysis,
 } from "../../src/analysis/cli.js";
+import { createIsolatedSession } from "../../src/isolated-session.js";
+
+const mockCreateSession = vi.mocked(createIsolatedSession);
 
 describe("encodeSessionDirName", () => {
 	it("encodes an absolute path with leading -- and trailing --", () => {
@@ -451,6 +460,51 @@ describe("runAnalysis", () => {
 			const result = await runAnalysis({ cwd: noSessionsCwd, noWrite: true });
 			expect(result.sessionFilesAnalyzed).toEqual([]);
 			expect(result.reportMarkdown).toContain("(no sessions analyzed)");
+		} finally {
+			if (homeBackup === undefined) delete process.env.HOME;
+			else process.env.HOME = homeBackup;
+		}
+	});
+
+	it("threads an aborted signal through to propose mode (no LLM call attempted)", async () => {
+		// Verifies the AnalysisOptions.signal plumbing: the propose path
+		// honors the signal end-to-end and produces an `aborted before LLM
+		// call` errorBlock without spawning the isolated session.
+		const homeBackup = process.env.HOME;
+		process.env.HOME = tmp;
+		try {
+			const { fakeCwd, fakeSessionsRoot } = setupFakeHome(tmp);
+			writeFakeSession(
+				fakeSessionsRoot,
+				fakeCwd,
+				"sess1.jsonl",
+				{
+					type: "session",
+					version: 3,
+					id: "uuid-abort",
+					timestamp: "2026-05-08T10:00:00.000Z",
+					cwd: fakeCwd,
+				},
+				[],
+			);
+			// Provide a fallback system-prompt source so propose-mode
+			// reaches the LLM-call branch (where the abort is caught)
+			// rather than short-circuiting on `grounding === "none"`.
+			const promptDir = join(fakeCwd, "src", "prompt");
+			mkdirSync(promptDir, { recursive: true });
+			writeFileSync(
+				join(promptDir, "system-prompt.ts"),
+				"export const fallbackPrompt = 'x';",
+				"utf-8",
+			);
+			const ac = new AbortController();
+			ac.abort();
+			const result = await runAnalysis(
+				{ cwd: fakeCwd, propose: true, noWrite: true },
+				{ signal: ac.signal },
+			);
+			expect(result.reportMarkdown).toContain("aborted before LLM call");
+			expect(mockCreateSession).not.toHaveBeenCalled();
 		} finally {
 			if (homeBackup === undefined) delete process.env.HOME;
 			else process.env.HOME = homeBackup;

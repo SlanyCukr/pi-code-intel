@@ -93,18 +93,23 @@ export const LSP_TOOL_NAME = "lsp";
 
 const LSP_DESCRIPTION = `Language Server Protocol tool for code intelligence operations.
 
+\`symbol\` is always an optional disambiguator on position-based actions:
+when given, the column is set to the first occurrence of \`symbol\` on
+the line; when omitted, the column falls back to 0 and the LSP server
+resolves the nearest token itself.
+
 Actions:
-- definition: Go to definition of a symbol (requires file, line, symbol)
-- type_definition: Go to type definition (requires file, line, symbol)
-- implementation: Find implementations of an interface/abstract (requires file, line, symbol)
-- references: Find all references to a symbol (requires file, line, symbol)
-- hover: Get type info and documentation for a symbol (requires file, line, symbol)
+- definition: Go to definition of a symbol (requires file, line)
+- type_definition: Go to type definition (requires file, line)
+- implementation: Find implementations of an interface/abstract (requires file, line)
+- references: Find all references to a symbol (requires file, line)
+- hover: Get type info and documentation for a symbol (requires file, line)
 - diagnostics: Get compiler errors/warnings (requires file)
 - document_symbols: List all symbols in a file (requires file)
 - workspace_symbols: Search for symbols across the workspace (requires file, query)
-- incoming_calls: Find all callers of a function (requires file, line, symbol)
-- outgoing_calls: Find all functions called by a function (requires file, line, symbol)
-- rename: Rename a symbol across the codebase (requires file, line, symbol, new_name)
+- incoming_calls: Find all callers of a function (requires file, line)
+- outgoing_calls: Find all functions called by a function (requires file, line)
+- rename: Rename a symbol across the codebase (requires file, line, new_name)
 - code_actions: Get available code fixes/refactors at a location (requires file, line)
 - status: Show which LSP servers are running
 - reload: Restart all LSP servers`;

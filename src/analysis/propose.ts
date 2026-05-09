@@ -275,7 +275,7 @@ export async function generateProposals(
 		}));
 
 		if (options.signal?.aborted) {
-			session.dispose();
+			// `session?.dispose()` in the finally block handles cleanup.
 			return errorBlock("aborted during session setup");
 		}
 

@@ -372,4 +372,40 @@ describe("generateProposals", () => {
 		expect(result).toContain("aborted before LLM call");
 		expect(mockCreateSession).not.toHaveBeenCalled();
 	});
+
+	it("disposes the session exactly once when aborted between session creation and prompt", async () => {
+		// Regression: an earlier version disposed once explicitly inside
+		// the post-create abort branch and again in the finally clause,
+		// double-disposing on this path. The fix relies on the finally
+		// for cleanup; verify dispose is called exactly once.
+		const ac = new AbortController();
+		const fakeSession = {
+			agent: { setSystemPrompt: vi.fn() },
+			messages: [],
+			prompt: vi.fn(async () => undefined),
+			abort: vi.fn(async () => undefined),
+			dispose: vi.fn(),
+		};
+		// createIsolatedSession resolves successfully, then the signal
+		// flips to aborted before we reach the post-create abort check.
+		mockCreateSession.mockImplementationOnce(async () => {
+			ac.abort();
+			return { session: fakeSession } as any;
+		});
+
+		const session = makeSession([captureEvent("p")]);
+		const result = await generateProposals(
+			{
+				aggregated: aggregateMetrics([], []),
+				sessionMetrics: [],
+				hitsBySession: new Map(),
+				parsedSessions: [session],
+				systemPromptSourcePath: join(tmp, "x.ts"),
+			},
+			{ cwd: tmp, signal: ac.signal },
+		);
+		expect(result).toContain("aborted during session setup");
+		expect(fakeSession.dispose).toHaveBeenCalledTimes(1);
+		expect(fakeSession.prompt).not.toHaveBeenCalled();
+	});
 });

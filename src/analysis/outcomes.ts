@@ -160,7 +160,14 @@ export function correlateOutcomes(
 		commitsInWindow = parseCommitList(stdout);
 	} catch (err) {
 		// Empty range or other non-fatal errors return no commits but the
-		// outcome record is still valid; we don't mark gitUnavailable.
+		// outcome record is still valid; we don't mark gitUnavailable. We
+		// still log to stderr so an unexpected git failure is visible
+		// rather than silently producing an empty commits list.
+		console.error(
+			`[analyze-sessions] git log (commits-in-window) failed for ${cwd}: ${
+				err instanceof Error ? err.message : String(err)
+			}`,
+		);
 		commitsInWindow = [];
 	}
 
@@ -193,7 +200,15 @@ export function correlateOutcomes(
 			revertedShas = commitsInWindow
 				.filter((c) => seen.has(c.sha))
 				.map((c) => c.sha);
-		} catch {
+		} catch (err) {
+			// Same discipline as the commits-in-window catch above: a failed
+			// revert search shouldn't poison the rest of the outcome record,
+			// but it shouldn't disappear silently either.
+			console.error(
+				`[analyze-sessions] git log (revert search) failed for ${cwd}: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			);
 			revertedShas = [];
 		}
 	}
