@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import {
+	type CreateAgentSessionOptions,
 	type ExtensionAPI,
 	type ExtensionFactory,
-	type ToolDefinition,
 	createBashTool,
 	isEditToolResult,
 	isWriteToolResult,
@@ -136,10 +136,10 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 
 	// 4. Context7 library docs tool
 	let context7Client: Context7Client | null = null;
-	let context7Tool: ToolDefinition | null = null;
+	let context7Tool: ReturnType<typeof createContext7Tool>["tool"] | null = null;
 	if (config.context7.enabled) {
 		const context7Result = createContext7Tool();
-		context7Tool = context7Result.tool as unknown as ToolDefinition;
+		context7Tool = context7Result.tool;
 		pi.registerTool(context7Result.tool);
 		context7Client = context7Result.client;
 		cleanupFns.push(async () => context7Client!.stop());
@@ -155,17 +155,15 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 		// manages — sub-agents reuse the instance and never tear it down.
 		// Sub-agent templates filter this list by name (see runner.ts), so a
 		// tool only becomes available when a template explicitly lists it.
-		const registeredCustomTools: ToolDefinition[] = [];
-		if (lspTool) {
-			registeredCustomTools.push(lspTool as unknown as ToolDefinition);
-		}
-		if (fetchTool) {
-			registeredCustomTools.push(fetchTool as unknown as ToolDefinition);
-		}
-		if (context7Tool) {
-			registeredCustomTools.push(context7Tool);
-		}
-		const agentTool = createAgentTool(registeredCustomTools);
+		// Each tool has a concrete TypeBox schema (typeof lspSchema, etc.); the
+		// SDK's customTools field uses the schema-erased ToolDefinition<TSchema>
+		// shape. The concrete-to-generic assignment is variance-unsafe, so the
+		// cast must go through `unknown`. Done once at the array level rather
+		// than at every push.
+		const registeredCustomTools = [lspTool, fetchTool, context7Tool].filter(
+			(t): t is NonNullable<typeof t> => t !== null,
+		) as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
+		const agentTool = createAgentTool(registeredCustomTools, lspTool !== null);
 		pi.registerTool(agentTool);
 	}
 

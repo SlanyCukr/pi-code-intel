@@ -56,13 +56,13 @@ const lspSchema = Type.Object(
 		file: Type.Optional(
 			Type.String({
 				description:
-					"File path (relative or absolute). Required for most actions.",
+					"File path (relative or absolute). Required for every action except 'status' and 'reload'. For 'workspace_symbols' the file selects which LSP server to query.",
 			}),
 		),
 		line: Type.Optional(
 			Type.Number({
 				description:
-					"1-based line number in the file. Required for position-based actions.",
+					"1-based line number in the file. Required for position-based actions: hover, definition, type_definition, implementation, references, incoming_calls, outgoing_calls, rename, code_actions.",
 			}),
 		),
 		symbol: Type.Optional(
@@ -74,7 +74,7 @@ const lspSchema = Type.Object(
 		query: Type.Optional(
 			Type.String({
 				description:
-					"Search query for workspace_symbols.",
+					"Search query for workspace_symbols. Required for the 'workspace_symbols' action.",
 			}),
 		),
 		new_name: Type.Optional(

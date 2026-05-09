@@ -64,6 +64,7 @@ function buildDescription(): string {
 
 export function createAgentTool(
 	customTools: CreateAgentSessionOptions["customTools"],
+	hasLsp: boolean,
 ): ToolDefinition<typeof agentSchema> {
 	return {
 		name: "agent",
@@ -115,6 +116,7 @@ export function createAgentTool(
 				cwd: ctx.cwd,
 				parentModel: ctx.model,
 				customTools,
+				hasLsp,
 				signal,
 				onProgress,
 				parentSessionDir: sessionDir,

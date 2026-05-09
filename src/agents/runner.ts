@@ -9,7 +9,6 @@ import {
 	createReadOnlyTools,
 } from "@mariozechner/pi-coding-agent";
 import { buildCodeExplorationGuidance } from "../prompt/code-exploration.js";
-import { LSP_TOOL_NAME } from "../lsp/tool.js";
 import { rtkSpawnHook } from "../rtk.js";
 
 const BASH_GUIDANCE = `<instruction>
@@ -105,9 +104,8 @@ function createBuiltInTools(template: AgentTemplate, cwd: string) {
  */
 function buildSubAgentSystemPrompt(
 	template: AgentTemplate,
-	filteredCustomTools: CreateAgentSessionOptions["customTools"],
+	hasLsp: boolean,
 ): string {
-	const hasLsp = filteredCustomTools?.some((t) => t.name === LSP_TOOL_NAME) ?? false;
 	const codeExploration = buildCodeExplorationGuidance(hasLsp);
 	const extras: string[] = [];
 	if (template.tools.includes("bash")) extras.push(BASH_GUIDANCE);
@@ -147,6 +145,7 @@ interface RunSubAgentOptions {
 	cwd: string;
 	parentModel: AnyModel | undefined;
 	customTools: CreateAgentSessionOptions["customTools"];
+	hasLsp: boolean;
 	signal?: AbortSignal;
 	onProgress?: (status: string) => void;
 	parentSessionDir?: string;
@@ -162,7 +161,7 @@ interface RunSubAgentOptions {
  * and disposes the session.
  */
 export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgentResult> {
-	const { template, task, cwd, parentModel, customTools, signal, onProgress, parentSessionDir, timeout } = options;
+	const { template, task, cwd, parentModel, customTools, hasLsp, signal, onProgress, parentSessionDir, timeout } = options;
 	// Resolve model: "inherit" uses parent model, otherwise undefined (let SDK resolve)
 	const model: AnyModel | undefined =
 		template.model === "inherit" ? parentModel : undefined;
@@ -190,7 +189,9 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
 
 		// Enforce template tool list — hide tools the template doesn't declare
 		session.setActiveToolsByName(template.tools);
-		session.agent.setSystemPrompt(buildSubAgentSystemPrompt(template, filteredCustomTools));
+		// Templates can also disable LSP guidance even when the parent registered the tool.
+		const templateHasLsp = hasLsp && template.tools.includes("lsp");
+		session.agent.setSystemPrompt(buildSubAgentSystemPrompt(template, templateHasLsp));
 
 		// Stream progress via session events — tool usage + partial assistant text
 		let toolCount = 0;

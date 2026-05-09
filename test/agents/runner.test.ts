@@ -250,6 +250,7 @@ describe("runSubAgent", () => {
 			cwd: "/tmp",
 			parentModel: undefined,
 			customTools: [],
+			hasLsp: false,
 			timeout: 100,
 		});
 
@@ -276,6 +277,7 @@ describe("runSubAgent", () => {
 			cwd: "/tmp",
 			parentModel: undefined,
 			customTools: [],
+			hasLsp: false,
 			timeout: 0,
 		});
 
@@ -303,6 +305,7 @@ describe("runSubAgent", () => {
 			cwd: "/tmp",
 			parentModel: undefined,
 			customTools: [],
+			hasLsp: false,
 			onProgress: (s) => progress.push(s),
 		});
 
@@ -330,6 +333,7 @@ describe("runSubAgent", () => {
 			cwd: "/tmp",
 			parentModel: undefined,
 			customTools: [],
+			hasLsp: false,
 			onProgress: (s) => progress.push(s),
 		});
 
@@ -346,6 +350,7 @@ describe("runSubAgent", () => {
 			cwd: "/tmp",
 			parentModel: undefined,
 			customTools: [],
+			hasLsp: false,
 		});
 
 		expect(result.error).toContain("boom");
