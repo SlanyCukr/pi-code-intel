@@ -1,5 +1,6 @@
 import { createIsolatedSession } from "../isolated-session.js";
 import type { AnyModel } from "../types.js";
+import { lastAssistantText } from "../utils/agent-messages.js";
 
 /** Content below this threshold is returned as-is without model summarization. */
 const SMALL_CONTENT_THRESHOLD = 30_000;
@@ -90,24 +91,8 @@ export async function summarizeContent(options: SummarizeOptions): Promise<strin
 		await session.prompt(buildExtractionPrompt(content, prompt));
 
 		// Extract the response
-		const messages = session.messages as Array<{ role: string; content: unknown }>;
-		for (let i = messages.length - 1; i >= 0; i--) {
-			const msg = messages[i];
-			if (msg.role !== "assistant") continue;
-
-			const parts: string[] = [];
-			if (typeof msg.content === "string") {
-				parts.push(msg.content);
-			} else if (Array.isArray(msg.content)) {
-				for (const block of msg.content as Array<{ type: string; text?: string }>) {
-					if (block.type === "text" && block.text) {
-						parts.push(block.text);
-					}
-				}
-			}
-			const text = parts.join("\n\n").trim();
-			if (text) return text;
-		}
+		const text = lastAssistantText(session.messages);
+		if (text) return text;
 
 		// Fallback: return truncated raw content
 		console.error("[code-intel] Web content summarization produced no text output from model, returning truncated raw content");

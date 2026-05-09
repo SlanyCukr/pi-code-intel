@@ -145,7 +145,7 @@ async function executeLspAction(
 
 	if (action === "reload") {
 		await manager.restart();
-		return "All LSP servers have been restarted. Cached state has been cleared.";
+		return "All LSP servers have been shut down and cached state cleared. They will be re-spawned on the next tool call.";
 	}
 
 	if (action === "workspace_symbols") {

@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import type { createAgentSession } from "@mariozechner/pi-coding-agent";
 import { createIsolatedSession } from "../isolated-session.js";
 import type { AnyModel } from "../types.js";
+import { lastAssistantText } from "../utils/agent-messages.js";
+import { formatPercent, formatRatio } from "./format.js";
 import type { AggregatedMetrics, SessionMetrics } from "./metrics.js";
 import type { AntiPatternHit, ParsedSession } from "./types.js";
 
@@ -160,10 +162,14 @@ export function buildProposalPrompt(input: {
 		(a, b) => byRule.get(b)!.length - byRule.get(a)!.length,
 	);
 	let included = 0;
+	// ruleIds.length >= 1 inside this loop, so the Math.max(1, ruleIds.length)
+	// guard the prior code carried is dead — the only divide-by-zero risk is
+	// when topK is below ruleIds.length, which Math.floor turns into 0; the
+	// outer Math.max(1, ...) keeps the slice cap at >=1.
 	for (const id of ruleIds) {
 		const hits = byRule.get(id)!;
 		lines.push(`### \`${id}\` — ${hits.length} hit${hits.length === 1 ? "" : "s"}`);
-		const sample = hits.slice(0, Math.max(1, Math.floor(topK / Math.max(1, ruleIds.length))));
+		const sample = hits.slice(0, Math.max(1, Math.floor(topK / ruleIds.length)));
 		for (const h of sample) {
 			lines.push(`- ${h.message}`);
 			included++;
@@ -306,28 +312,10 @@ export async function generateProposals(
 
 /**
  * Pull the last assistant message text out of a session's message log.
- * Mirrors the summarizer's extraction logic; image content is dropped.
+ * Re-exported for the proposal flow's null-on-miss contract; see
+ * `lastAssistantText` for the shared implementation.
  */
-export function extractLastAssistantText(messages: unknown[]): string | null {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i] as { role?: string; content?: unknown };
-		if (msg?.role !== "assistant") continue;
-
-		const parts: string[] = [];
-		if (typeof msg.content === "string") {
-			parts.push(msg.content);
-		} else if (Array.isArray(msg.content)) {
-			for (const block of msg.content as Array<{ type?: string; text?: string }>) {
-				if (block?.type === "text" && typeof block.text === "string") {
-					parts.push(block.text);
-				}
-			}
-		}
-		const text = parts.join("\n\n").trim();
-		if (text) return text;
-	}
-	return null;
-}
+export const extractLastAssistantText = lastAssistantText;
 
 function renderGroundingFooter(grounding: ProposalGrounding): string {
 	if (grounding.kind === "captured") {
@@ -347,10 +335,3 @@ function errorBlock(reason: string): string {
 	].join("\n");
 }
 
-function formatRatio(r: number | null): string {
-	return r === null ? "n/a" : r.toFixed(2);
-}
-
-function formatPercent(r: number | null): string {
-	return r === null ? "n/a" : `${(r * 100).toFixed(1)}%`;
-}

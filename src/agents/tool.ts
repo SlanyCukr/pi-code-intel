@@ -1,11 +1,11 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type {
+	AgentToolResult,
 	ExtensionContext,
 	ToolDefinition,
 	AgentToolUpdateCallback,
 	CreateAgentSessionOptions,
 } from "@mariozechner/pi-coding-agent";
-import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { runSubAgent } from "./runner.js";
 import {
 	getTemplate,

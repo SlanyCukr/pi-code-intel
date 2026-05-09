@@ -150,17 +150,17 @@ When the fallback is used, proposals are labeled forward-looking in the report f
 ```
 extension.ts → config.ts, lsp/*, web/*, agents/*, commands/*, prompt/*, analysis/capture.ts, rtk.ts
 agents/tool.ts → agents/runner.ts, agents/templates.ts
-agents/runner.ts → agents/templates.ts, prompt/code-exploration.ts, lsp/tool.ts, rtk.ts, types.ts
+agents/runner.ts → agents/templates.ts, prompt/code-exploration.ts, rtk.ts, types.ts, utils/agent-messages.ts
 agents/templates.ts → utils/frontmatter.ts, utils/templates.ts
 analysis/cli-main.ts → analysis/cli.ts → analysis/{reader, metrics, patterns/*, outcomes, propose, report}.ts
 analysis/cli.ts → @mariozechner/pi-coding-agent (getAgentDir for $PI_CODING_AGENT_DIR)
 analysis/capture.ts (self-contained pi hook + customType constant; consumed by reader.ts)
-analysis/propose.ts → types.ts (AnyModel) + isolated-session.ts
+analysis/propose.ts → types.ts (AnyModel) + isolated-session.ts + utils/agent-messages.ts
 isolated-session.ts (single boundary for one-off LLM calls; consumed by propose.ts and web/summarizer.ts)
 commands/registry.ts → agents/templates.ts, utils/frontmatter.ts, utils/templates.ts (exposes $EXTENSION_DIST substitution)
 lsp/tool.ts → lsp/client.ts → lsp/config.ts, lsp/utils.ts, lsp/types.ts
 web/tool.ts → web/fetch.ts, web/summarizer.ts
-web/summarizer.ts → types.ts, isolated-session.ts
+web/summarizer.ts → types.ts, isolated-session.ts, utils/agent-messages.ts
 web/context7.ts (self-contained MCP client + tool definition; CONTEXT7_MCP_VERSION pin)
 ```
 

@@ -63,7 +63,8 @@ describe("LSP tool execute", () => {
 		it("calls restart and returns confirmation", async () => {
 			const text = await exec({ action: "reload" });
 			expect(manager.restart).toHaveBeenCalled();
-			expect(text).toContain("restarted");
+			expect(text).toContain("shut down");
+			expect(text).toContain("re-spawned");
 		});
 	});
 

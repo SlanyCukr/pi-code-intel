@@ -1,10 +1,10 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type {
+	AgentToolResult,
 	ExtensionContext,
 	ToolDefinition,
 	AgentToolUpdateCallback,
 } from "@mariozechner/pi-coding-agent";
-import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { fetchUrl } from "./fetch.js";
 import { summarizeContent } from "./summarizer.js";
 

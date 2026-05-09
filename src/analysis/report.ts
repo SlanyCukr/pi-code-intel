@@ -1,3 +1,4 @@
+import { formatPercent, formatRatio } from "./format.js";
 import type {
 	AggregatedMetrics,
 	SessionMetrics,
@@ -257,16 +258,6 @@ function renderProposals(input: RenderInput): string {
  * Format a ratio for the markdown table. `null` becomes `n/a` so the
  * cell reads cleanly when the denominator was zero.
  */
-function formatRatio(r: number | null): string {
-	if (r === null) return "n/a";
-	return r.toFixed(2);
-}
-
-function formatPercent(r: number | null): string {
-	if (r === null) return "n/a";
-	return `${(r * 100).toFixed(1)}%`;
-}
-
 function formatDate(d: Date): string {
 	const yyyy = d.getFullYear();
 	const mm = String(d.getMonth() + 1).padStart(2, "0");

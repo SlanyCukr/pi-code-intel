@@ -1,11 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { Type, type Static } from "@sinclair/typebox";
 import type {
+	AgentToolResult,
 	ToolDefinition,
 	AgentToolUpdateCallback,
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
-import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 
 export const CONTEXT7_TOOL_NAME = "context7";
 

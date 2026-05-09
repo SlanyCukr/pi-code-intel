@@ -31,9 +31,11 @@
 		"turndown": "^7.2.2"
 	},
 	"peerDependencies": {
+		"@mariozechner/pi-agent-core": ">=0.62.0",
 		"@mariozechner/pi-coding-agent": ">=0.62.0"
 	},
 	"devDependencies": {
+		"@mariozechner/pi-agent-core": "^0.62.0",
 		"@mariozechner/pi-coding-agent": "^0.62.0",
 		"@types/node": "^22.0.0",
 		"@types/turndown": "^5.0.6",

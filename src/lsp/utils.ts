@@ -395,27 +395,20 @@ export function resolveSymbolPosition(
 	filePath: string,
 	line: number,
 	symbol?: string,
-	occurrence = 1,
 ): Position {
 	// line is 1-based from user, convert to 0-based
 	const zeroLine = line - 1;
+	const fallback: Position = { line: zeroLine, character: 0 };
 
 	if (!symbol) {
-		return { line: zeroLine, character: 0 };
+		return fallback;
 	}
 
 	try {
 		const content = readFileSync(filePath, "utf-8");
 		const lines = content.split("\n");
 		if (zeroLine >= 0 && zeroLine < lines.length) {
-			const lineContent = lines[zeroLine];
-			let found = 0;
-			let idx = -1;
-			while (found < occurrence) {
-				idx = lineContent.indexOf(symbol, idx + 1);
-				if (idx === -1) break;
-				found++;
-			}
+			const idx = lines[zeroLine].indexOf(symbol);
 			if (idx !== -1) {
 				return { line: zeroLine, character: idx };
 			}
@@ -427,5 +420,5 @@ export function resolveSymbolPosition(
 		}
 	}
 
-	return { line: zeroLine, character: 0 };
+	return fallback;
 }

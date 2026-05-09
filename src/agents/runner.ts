@@ -10,6 +10,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { buildCodeExplorationGuidance } from "../prompt/code-exploration.js";
 import { rtkSpawnHook } from "../rtk.js";
+import { lastAssistantText } from "../utils/agent-messages.js";
 
 const BASH_GUIDANCE = `<instruction>
 ## Bash usage
@@ -48,35 +49,14 @@ interface SubAgentResult {
  * Extract the final report from agent messages.
  *
  * Takes only the last assistant message's text blocks — earlier messages
- * are stream-of-consciousness narration, not the final report.
+ * are stream-of-consciousness narration, not the final report. Returns ""
+ * when no assistant message has any text; runSubAgent then surfaces a
+ * "completed with no text output" placeholder.
  */
 export function extractFinalReport(
 	messages: Array<{ role: string; content: unknown }>,
 ): string {
-	// Walk backwards to find the last assistant message with text
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (msg.role !== "assistant") continue;
-
-		const parts: string[] = [];
-		if (typeof msg.content === "string") {
-			parts.push(msg.content);
-		} else if (Array.isArray(msg.content)) {
-			for (const block of msg.content as Array<{
-				type: string;
-				text?: string;
-			}>) {
-				if (block.type === "text" && block.text) {
-					parts.push(block.text);
-				}
-			}
-		}
-
-		const text = parts.join("\n\n").trim();
-		if (text) return text;
-	}
-
-	return "";
+	return lastAssistantText(messages) ?? "";
 }
 
 /**
@@ -149,7 +129,7 @@ interface RunSubAgentOptions {
 	signal?: AbortSignal;
 	onProgress?: (status: string) => void;
 	parentSessionDir?: string;
-	/** Timeout in milliseconds. Defaults to 5 minutes. Set to 0 to disable. */
+	/** Timeout in milliseconds. Defaults to DEFAULT_TIMEOUT_MS (15 minutes). Set to 0 to disable. */
 	timeout?: number;
 }
 
