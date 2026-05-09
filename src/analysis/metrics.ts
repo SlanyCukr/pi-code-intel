@@ -164,7 +164,7 @@ export function aggregateMetrics(
 			if (ev.name !== "bash") continue;
 			totalBashCalls++;
 			const cmd = typeof ev.arguments?.command === "string"
-				? (ev.arguments.command as string)
+				? ev.arguments.command
 				: "";
 			if (isGrepLikeBashCommand(cmd)) totalGrepCalls++;
 		}

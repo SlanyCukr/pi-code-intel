@@ -5,6 +5,26 @@ import { groupTemplatesByCategory } from "../agents/templates.js";
 import { getString, parseFrontmatter } from "../utils/frontmatter.js";
 import { loadMarkdownDir } from "../utils/templates.js";
 
+/**
+ * Subset of the runtime ExtensionAPI we depend on.
+ *
+ * The pi SDK ships these methods but their type declarations vary across
+ * minor versions; the explicit shape below isolates that volatility into one
+ * place and avoids `pi as any` escape hatches everywhere we touch them.
+ * `registerCommand` and `sendUserMessage` are guaranteed by peerDep
+ * `>=0.62.0`. Older callers of `sendMessage` are no longer supported.
+ */
+interface CommandRegistryApi {
+	registerCommand?(
+		name: string,
+		def: {
+			description: string;
+			handler: (args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => unknown;
+		},
+	): void;
+	sendUserMessage?(text: string): void;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface CommandTemplate {
@@ -59,8 +79,7 @@ function loadCommandTemplates(): CommandTemplate[] {
  *
  * Each command expands its template (replacing $ARGUMENTS and
  * $EXTENSION_DIST) and injects the result into the conversation via
- * sendUserMessage (or sendMessage with display:false as a fallback for
- * older SDK versions).
+ * `sendUserMessage`.
  *
  * `$EXTENSION_DIST` is substituted with the absolute path to this
  * extension's compiled `dist/` directory. Use it in templates that
@@ -70,14 +89,17 @@ function loadCommandTemplates(): CommandTemplate[] {
  * fail.
  */
 export function registerCommands(pi: ExtensionAPI): void {
-	// Cast to any: pi.registerCommand and pi.sendUserMessage exist
-	// on the runtime API but may not be in the type declarations
-	// bundled with older versions of the SDK.
-	const piAny = pi as any;
+	const api = pi as ExtensionAPI & CommandRegistryApi;
 
-	if (typeof piAny.registerCommand !== "function") {
+	if (typeof api.registerCommand !== "function") {
 		console.error(
 			"[code-intel] SDK does not support registerCommand — slash commands unavailable",
+		);
+		return;
+	}
+	if (typeof api.sendUserMessage !== "function") {
+		console.error(
+			"[code-intel] SDK does not expose sendUserMessage — slash commands unavailable",
 		);
 		return;
 	}
@@ -86,40 +108,26 @@ export function registerCommands(pi: ExtensionAPI): void {
 	// Templates are loaded from `<dist>/commands/templates/`; `__dirname`
 	// here is `<dist>/commands/`, so its parent is `<dist>`.
 	const extensionDist = dirname(__dirname);
+	const sendUserMessage = api.sendUserMessage.bind(api);
 
 	// Register command templates from the templates directory
 	const templates = loadCommandTemplates();
 	for (const template of templates) {
-		piAny.registerCommand(template.name, {
+		api.registerCommand(template.name, {
 			description: template.description,
 			handler: async (args: string) => {
 				const expanded = template.prompt
 					.replace(/\$ARGUMENTS/g, args || "")
 					.replace(/\$EXTENSION_DIST/g, extensionDist);
-				if (typeof piAny.sendUserMessage === "function") {
-					piAny.sendUserMessage(expanded);
-				} else if (typeof piAny.sendMessage === "function") {
-					piAny.sendMessage(
-						{ content: expanded, display: false },
-						{ triggerTurn: true },
-					);
-				} else {
-					console.error(
-						"[code-intel] Cannot send command message: SDK does not expose sendUserMessage or sendMessage",
-					);
-				}
+				sendUserMessage(expanded);
 			},
 		});
 	}
 
 	// Register /agents command to list available sub-agents
-	registerAgentsCommand(piAny);
-}
-
-function registerAgentsCommand(pi: any): void {
-	pi.registerCommand("agents", {
+	api.registerCommand("agents", {
 		description: "List available sub-agents",
-		handler: async (_args: string, ctx: any) => {
+		handler: async (_args, ctx) => {
 			const byCategory = groupTemplatesByCategory();
 			if (byCategory.size === 0) {
 				ctx.ui.notify("No sub-agents available", "info");

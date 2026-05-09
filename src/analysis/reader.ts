@@ -52,6 +52,12 @@ export function readSession(path: string): ParsedSession {
 
 		const lineNumber = i + 1; // 1-based for human-readable references
 
+		// Pi session JSONL is a permissive event format that includes 6+
+		// `type` discriminants with mostly disjoint payloads. The reader
+		// hand-narrows each branch via `typeof`/`Array.isArray` checks below,
+		// so the parsed object is typed `any` here rather than carrying a
+		// large precarious union — every field is validated at the use site.
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let entry: any;
 		try {
 			entry = JSON.parse(line);
@@ -203,6 +209,9 @@ export function readSession(path: string): ParsedSession {
  *   tool use that the analyzer measures.
  */
 function expandMessageEntry(
+	// Same any-typed entry as the reader's main loop; see the comment there
+	// for the rationale. Each branch below validates the fields it consumes.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	entry: any,
 	lineNumber: number,
 	entryId: string,
@@ -289,9 +298,9 @@ function flattenContentText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	const parts: string[] = [];
-	for (const block of content) {
-		if (block && typeof block === "object" && (block as any).type === "text") {
-			const t = (block as any).text;
+	for (const block of content as Array<{ type?: unknown; text?: unknown }>) {
+		if (block && typeof block === "object" && block.type === "text") {
+			const t = block.text;
 			if (typeof t === "string") parts.push(t);
 		}
 	}

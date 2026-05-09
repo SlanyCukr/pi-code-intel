@@ -48,25 +48,15 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 
 	// One-time runtime init: remove grep/find/ls from active tools.
 	// RTK-wrapped bash provides the same functionality with token-optimized output.
+	const HIDDEN_TOOLS = new Set(["grep", "find", "ls"]);
 	let runtimeInitDone = false;
 	pi.on("before_agent_start", () => {
 		if (runtimeInitDone) return;
 		runtimeInitDone = true;
-		const piAny = pi as any;
-		if (
-			typeof piAny.getActiveTools === "function" &&
-			typeof piAny.setActiveTools === "function"
-		) {
-			const active: string[] = piAny.getActiveTools();
-			const hidden = new Set(["grep", "find", "ls"]);
-			const filtered = active.filter((t) => !hidden.has(t));
-			if (filtered.length !== active.length) {
-				piAny.setActiveTools(filtered);
-			}
-		} else {
-			console.error(
-				"[code-intel] SDK does not support getActiveTools/setActiveTools — grep/find/ls tools remain active alongside bash",
-			);
+		const active = pi.getActiveTools();
+		const filtered = active.filter((t) => !HIDDEN_TOOLS.has(t));
+		if (filtered.length !== active.length) {
+			pi.setActiveTools(filtered);
 		}
 	});
 

@@ -1,4 +1,5 @@
 import type {
+	AnalysisEvent,
 	AntiPatternHit,
 	AntiPatternRule,
 	ToolCallEvent,
@@ -55,7 +56,7 @@ export const editFailureThenReread: AntiPatternRule = (session) => {
  * either an `edit` OR a `read` of `path`. Returns null if none.
  */
 function findNextEditOrReadOfPath(
-	events: ReturnType<() => any[]>,
+	events: readonly AnalysisEvent[],
 	start: number,
 	path: string,
 ): ToolCallEvent | null {
@@ -64,7 +65,7 @@ function findNextEditOrReadOfPath(
 		if (ev.kind !== "tool_call") continue;
 		if (ev.name !== "edit" && ev.name !== "read") continue;
 		if (getFilePathArg(ev) !== path) continue;
-		return ev as ToolCallEvent;
+		return ev;
 	}
 	return null;
 }
