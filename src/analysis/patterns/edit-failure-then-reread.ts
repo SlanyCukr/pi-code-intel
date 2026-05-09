@@ -54,8 +54,12 @@ export const editFailureThenReread: AntiPatternRule = (session) => {
 /**
  * Walk forward from `start` and return the first tool_call that is
  * either an `edit` OR a `read` of `path`. Returns null if none.
+ *
+ * Exported to align with sibling pattern rules (`extractSymbolPattern`,
+ * `extractGrepTargetFiles`), which expose their pure parsing/walking
+ * helpers for direct testing.
  */
-function findNextEditOrReadOfPath(
+export function findNextEditOrReadOfPath(
 	events: readonly AnalysisEvent[],
 	start: number,
 	path: string,

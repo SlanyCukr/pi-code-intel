@@ -30,7 +30,7 @@ export function parseFrontmatter(
  * string and quoted string conventions. Returns undefined when the key
  * is absent.
  */
-export function getString(
+export function getFrontmatterString(
 	frontmatter: string,
 	key: string,
 ): string | undefined {
@@ -55,7 +55,7 @@ export function getString(
  * Matches lines of the form `key: [a, b, c]` and returns the items as a
  * trimmed string array. Returns an empty array when the key is absent.
  */
-export function getArray(frontmatter: string, key: string): string[] {
+export function getFrontmatterArray(frontmatter: string, key: string): string[] {
 	const match = frontmatter.match(
 		new RegExp(`^${escapeRegex(key)}:\\s*\\[([^\\]]+)\\]`, "m"),
 	);

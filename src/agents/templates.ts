@@ -2,7 +2,11 @@ import { readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { getArray, getString, parseFrontmatter } from "../utils/frontmatter.js";
+import {
+	getFrontmatterArray,
+	getFrontmatterString,
+	parseFrontmatter,
+} from "../utils/frontmatter.js";
 import { loadMarkdownDir } from "../utils/templates.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,11 +44,11 @@ function parseTemplate(content: string): AgentTemplate | null {
 	const { frontmatter, body } = parsed;
 	const systemPrompt = body.trim();
 
-	const name = getString(frontmatter, "name");
-	const category = getString(frontmatter, "category");
-	const description = getString(frontmatter, "description");
-	const rawModel = getString(frontmatter, "model");
-	const rawThinking = getString(frontmatter, "thinkingLevel") ?? "medium";
+	const name = getFrontmatterString(frontmatter, "name");
+	const category = getFrontmatterString(frontmatter, "category");
+	const description = getFrontmatterString(frontmatter, "description");
+	const rawModel = getFrontmatterString(frontmatter, "model");
+	const rawThinking = getFrontmatterString(frontmatter, "thinkingLevel") ?? "medium";
 
 	if (!name || !category || !description || !rawModel) return null;
 	if (!VALID_MODELS.includes(rawModel as (typeof VALID_MODELS)[number]))
@@ -58,7 +62,7 @@ function parseTemplate(content: string): AgentTemplate | null {
 		description,
 		model: rawModel as AgentTemplate["model"],
 		thinkingLevel: rawThinking as ThinkingLevel,
-		tools: getArray(frontmatter, "tools"),
+		tools: getFrontmatterArray(frontmatter, "tools"),
 		systemPrompt,
 	};
 }

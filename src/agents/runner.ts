@@ -123,7 +123,7 @@ interface RunSubAgentOptions {
 	template: AgentTemplate;
 	task: string;
 	cwd: string;
-	parentModel: AnyModel | undefined;
+	parentModel?: AnyModel;
 	customTools: CreateAgentSessionOptions["customTools"];
 	hasLsp: boolean;
 	signal?: AbortSignal;

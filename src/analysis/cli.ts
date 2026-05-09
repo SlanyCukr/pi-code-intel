@@ -69,7 +69,7 @@ export interface AnalysisOptions {
  * Run the full analysis pipeline end-to-end.
  *
  * Steps:
- *  1. Locate the session directory for `args.cwd`.
+ *  1. Locate the session directory for `cwd`.
  *  2. Enumerate `.jsonl` files honoring `sinceMs` and `sessionId`
  *     filters.
  *  3. Parse each file. Files that fail to parse are recorded in
@@ -100,8 +100,8 @@ export async function runAnalysis(
 	// "./proj" would be encoded as `--.--` / `--.-proj--` and find no
 	// sessions despite the dir existing. Normalizing here protects both
 	// the CLI entry and any programmatic caller.
-	args = { ...args, cwd: resolve(args.cwd) };
-	const sessionsDir = resolveSessionsDir(args.cwd);
+	const cwd = resolve(args.cwd);
+	const sessionsDir = resolveSessionsDir(cwd);
 	const candidates = listSessionFiles(sessionsDir, args);
 	const parsed: ParsedSession[] = [];
 	const skipped: string[] = [];
@@ -147,10 +147,10 @@ export async function runAnalysis(
 				sessionMetrics: perSession,
 				hitsBySession,
 				parsedSessions: parsed,
-				systemPromptSourcePath: resolveSystemPromptFallback(args.cwd),
+				systemPromptSourcePath: resolveSystemPromptFallback(cwd),
 			},
 			{
-				cwd: args.cwd,
+				cwd: cwd,
 				signal: options.signal,
 			},
 		);
@@ -167,7 +167,7 @@ export async function runAnalysis(
 
 	let outPath: string | null = null;
 	if (!args.noWrite) {
-		outPath = args.out ?? defaultReportPath(args.cwd);
+		outPath = args.out ?? defaultReportPath(cwd);
 		const outDir = outPath.substring(0, outPath.lastIndexOf("/"));
 		if (outDir) mkdirSync(outDir, { recursive: true });
 		writeFileSync(outPath, reportMarkdown, "utf-8");

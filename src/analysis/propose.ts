@@ -105,6 +105,14 @@ export function selectGrounding(
 	}
 }
 
+export interface BuildProposalPromptInput {
+	aggregated: AggregatedMetrics;
+	hits: AntiPatternHit[];
+	grounding: ProposalGrounding;
+	/** Max number of anti-pattern hits to include; defaults to 20. */
+	topK?: number;
+}
+
 /**
  * Build the prompt for the proposer LLM. Pure function, deterministic
  * given its inputs — easy to snapshot-test.
@@ -120,12 +128,7 @@ export function selectGrounding(
  * reasonable token budget; rule frequencies still appear via the
  * metrics block, and per-hit detail is bounded.
  */
-export function buildProposalPrompt(input: {
-	aggregated: AggregatedMetrics;
-	hits: AntiPatternHit[];
-	grounding: ProposalGrounding;
-	topK?: number;
-}): string {
+export function buildProposalPrompt(input: BuildProposalPromptInput): string {
 	const topK = input.topK ?? 20;
 	const lines: string[] = [];
 

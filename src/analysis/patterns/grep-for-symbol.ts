@@ -74,14 +74,14 @@ export function extractSymbolPattern(command: string): string | null {
 			// Pattern is the NEXT token.
 			i++;
 			if (i >= tokens.length) return null;
-			return classify(tokens[i]);
+			return extractIdentifier(tokens[i]);
 		}
 		if (t === "--include" || t === "--exclude" || t === "--include-dir" || t === "--exclude-dir") {
 			i++; // skip the glob arg
 			continue;
 		}
 		if (t.startsWith("-")) continue; // ordinary flag
-		return classify(t);
+		return extractIdentifier(t);
 	}
 	return null;
 }
@@ -90,7 +90,7 @@ export function extractSymbolPattern(command: string): string | null {
  * Return the token as a bare identifier if it qualifies, otherwise null.
  * Strips surrounding quotes and `^`/`$` anchors before checking.
  */
-function classify(token: string): string | null {
+function extractIdentifier(token: string): string | null {
 	let s = token;
 	// Strip matching surrounding quotes.
 	if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {

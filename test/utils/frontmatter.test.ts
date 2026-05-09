@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseFrontmatter, getString, getArray } from "../../src/utils/frontmatter.js";
+import {
+	getFrontmatterArray,
+	getFrontmatterString,
+	parseFrontmatter,
+} from "../../src/utils/frontmatter.js";
 
 describe("parseFrontmatter", () => {
 	it("parses valid content with frontmatter", () => {
@@ -36,73 +40,73 @@ describe("parseFrontmatter", () => {
 	});
 });
 
-describe("getString", () => {
+describe("getFrontmatterString", () => {
 	it("returns value for an existing key", () => {
 		const frontmatter = "name: my-template\nmodel: sonnet";
-		expect(getString(frontmatter, "name")).toBe("my-template");
-		expect(getString(frontmatter, "model")).toBe("sonnet");
+		expect(getFrontmatterString(frontmatter, "name")).toBe("my-template");
+		expect(getFrontmatterString(frontmatter, "model")).toBe("sonnet");
 	});
 
 	it("returns undefined for a missing key", () => {
 		const frontmatter = "name: my-template";
-		expect(getString(frontmatter, "description")).toBeUndefined();
+		expect(getFrontmatterString(frontmatter, "description")).toBeUndefined();
 	});
 
 	it("strips surrounding double quotes from value", () => {
 		const frontmatter = 'description: "A quoted description"';
-		expect(getString(frontmatter, "description")).toBe("A quoted description");
+		expect(getFrontmatterString(frontmatter, "description")).toBe("A quoted description");
 	});
 
 	it("strips surrounding single quotes from value", () => {
 		const frontmatter = "description: 'A single-quoted value'";
-		expect(getString(frontmatter, "description")).toBe("A single-quoted value");
+		expect(getFrontmatterString(frontmatter, "description")).toBe("A single-quoted value");
 	});
 
 	it("trims whitespace from value", () => {
 		const frontmatter = "name:   spaced-value  ";
-		expect(getString(frontmatter, "name")).toBe("spaced-value");
+		expect(getFrontmatterString(frontmatter, "name")).toBe("spaced-value");
 	});
 
 	it("only strips matching leading/trailing quote pairs", () => {
 		// Mixed quotes — leave value untouched (don't silently strip both).
-		expect(getString("description: 'foo\"", "description")).toBe("'foo\"");
-		expect(getString('description: "foo\'', "description")).toBe('"foo\'');
+		expect(getFrontmatterString("description: 'foo\"", "description")).toBe("'foo\"");
+		expect(getFrontmatterString('description: "foo\'', "description")).toBe('"foo\'');
 		// Unbalanced (only leading) — leave untouched.
-		expect(getString("name: \"foo", "name")).toBe('"foo');
-		expect(getString("name: foo\"", "name")).toBe('foo"');
+		expect(getFrontmatterString("name: \"foo", "name")).toBe('"foo');
+		expect(getFrontmatterString("name: foo\"", "name")).toBe('foo"');
 	});
 
 	it("escapes regex metacharacters in the key", () => {
 		// Without escaping, `.` would match any character and produce a false
 		// positive against an unrelated key.
 		const frontmatter = "foo.bar: real\nfooxbar: bogus";
-		expect(getString(frontmatter, "foo.bar")).toBe("real");
+		expect(getFrontmatterString(frontmatter, "foo.bar")).toBe("real");
 	});
 });
 
-describe("getArray", () => {
+describe("getFrontmatterArray", () => {
 	it("returns items for an existing array key", () => {
 		const frontmatter = "tools: [read, bash, lsp]";
-		expect(getArray(frontmatter, "tools")).toEqual(["read", "bash", "lsp"]);
+		expect(getFrontmatterArray(frontmatter, "tools")).toEqual(["read", "bash", "lsp"]);
 	});
 
 	it("returns empty array for a missing key", () => {
 		const frontmatter = "name: my-template";
-		expect(getArray(frontmatter, "tools")).toEqual([]);
+		expect(getFrontmatterArray(frontmatter, "tools")).toEqual([]);
 	});
 
 	it("trims whitespace from each array item", () => {
 		const frontmatter = "tools: [ read , bash , lsp ]";
-		expect(getArray(frontmatter, "tools")).toEqual(["read", "bash", "lsp"]);
+		expect(getFrontmatterArray(frontmatter, "tools")).toEqual(["read", "bash", "lsp"]);
 	});
 
 	it("returns empty array for malformed array without closing bracket", () => {
 		const frontmatter = "tools: [read, bash";
-		expect(getArray(frontmatter, "tools")).toEqual([]);
+		expect(getFrontmatterArray(frontmatter, "tools")).toEqual([]);
 	});
 
 	it("escapes regex metacharacters in the key", () => {
 		const frontmatter = "foo.bar: [a, b]\nfooxbar: [c, d]";
-		expect(getArray(frontmatter, "foo.bar")).toEqual(["a", "b"]);
+		expect(getFrontmatterArray(frontmatter, "foo.bar")).toEqual(["a", "b"]);
 	});
 });

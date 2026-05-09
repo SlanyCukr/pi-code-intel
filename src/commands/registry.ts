@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { groupTemplatesByCategory } from "../agents/templates.js";
-import { getString, parseFrontmatter } from "../utils/frontmatter.js";
+import { getFrontmatterString, parseFrontmatter } from "../utils/frontmatter.js";
 import { loadMarkdownDir } from "../utils/templates.js";
 
 /**
@@ -44,14 +44,14 @@ function parseCommandTemplate(content: string): CommandTemplate | null {
 	const { frontmatter, body } = parsed;
 	const prompt = body.trim();
 
-	const name = getString(frontmatter, "name");
-	const description = getString(frontmatter, "description");
+	const name = getFrontmatterString(frontmatter, "name");
+	const description = getFrontmatterString(frontmatter, "description");
 	if (!name || !description) return null;
 
 	return {
 		name,
 		description,
-		argumentHint: getString(frontmatter, "argument-hint"),
+		argumentHint: getFrontmatterString(frontmatter, "argument-hint"),
 		prompt,
 	};
 }
