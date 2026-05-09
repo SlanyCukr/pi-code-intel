@@ -9,8 +9,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Mock the isolation helper so propose-mode tests don't actually spawn
-// an LLM session. Existing non-propose tests don't trigger this mock.
+// Mock createIsolatedSession (the SDK boundary). Non-propose tests
+// don't trigger this; propose-mode tests verify the runIsolatedTextCall
+// helper end-to-end via the mocked SDK call underneath.
 vi.mock("../../src/isolated-session.js", () => ({
 	createIsolatedSession: vi.fn(),
 }));

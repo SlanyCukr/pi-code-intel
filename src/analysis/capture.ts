@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { asExtendedApi, safeGetActiveTools } from "../sdk-api.js";
 
 /**
  * `customType` value used for system-prompt entries persisted via
@@ -38,11 +39,8 @@ export const SYSTEM_PROMPT_CUSTOM_TYPE = "code-intel:system-prompt";
  * as disabled and the rest of the extension continues to work.
  */
 export function installSystemPromptCapture(pi: ExtensionAPI): void {
-	const piAny = pi as unknown as {
-		appendEntry?: (customType: string, data: unknown) => void;
-		getActiveTools?: () => string[];
-	};
-	if (typeof piAny.appendEntry !== "function") {
+	const sdk = asExtendedApi(pi);
+	if (typeof sdk.appendEntry !== "function") {
 		console.error(
 			"[code-intel] SDK does not support appendEntry — system prompt capture disabled",
 		);
@@ -57,12 +55,11 @@ export function installSystemPromptCapture(pi: ExtensionAPI): void {
 		if (hash === lastPromptHash) return;
 		lastPromptHash = hash;
 		try {
-			piAny.appendEntry!(SYSTEM_PROMPT_CUSTOM_TYPE, {
+			sdk.appendEntry!(SYSTEM_PROMPT_CUSTOM_TYPE, {
 				text,
 				hash,
 				capturedAt: new Date().toISOString(),
-				activeTools:
-					typeof piAny.getActiveTools === "function" ? piAny.getActiveTools() : [],
+				activeTools: safeGetActiveTools(pi),
 			});
 		} catch (err) {
 			// Capture failures must never abort the session.

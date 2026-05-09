@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildExtractionPrompt, summarizeContent } from "../../src/web/summarizer.js";
 
-// Summarizer now goes through the createIsolatedSession helper, which
-// itself wraps pi-coding-agent's createAgentSession with a no-extensions
-// resource loader. We mock at the helper boundary so these tests don't
-// have to know about the loader machinery.
+// Mock createIsolatedSession (the SDK boundary). The shared
+// runIsolatedTextCall helper lives in its own module so its abort and
+// lifecycle logic continues to run end-to-end through these tests.
 vi.mock("../../src/isolated-session.js", () => ({
 	createIsolatedSession: vi.fn(),
 }));

@@ -1,6 +1,5 @@
-import { createIsolatedSession } from "../isolated-session.js";
+import { runIsolatedTextCall } from "../utils/isolated-text-call.js";
 import type { AnyModel } from "../types.js";
-import { lastAssistantText } from "../utils/agent-messages.js";
 
 /** Content below this threshold is returned as-is without model summarization. */
 const SMALL_CONTENT_THRESHOLD = 30_000;
@@ -40,67 +39,33 @@ Provide a concise response based on the content above. Include relevant details,
  * Summarize web content using a lightweight agent session.
  *
  * For small content (<=30K chars), returns the markdown directly.
- * For larger content, creates a single-turn agent session (no tools)
- * to extract the relevant information.
+ * For larger content, runs a single-turn isolated agent session (no
+ * tools) via `runIsolatedTextCall`. Aborts throw; an empty model
+ * response degrades to truncated raw content rather than failing the
+ * whole web fetch.
  */
 export async function summarizeContent(options: SummarizeOptions): Promise<string> {
 	const { content, prompt, cwd, model, signal } = options;
 
-	// Small content: return directly without model call
 	if (content.length <= SMALL_CONTENT_THRESHOLD) {
 		return content;
 	}
 
-	// Refuse to spend a model call if we've already been aborted. EventTarget
-	// does not replay past `abort` events, so a listener attached after
-	// abort would never fire.
-	if (signal?.aborted) {
+	const result = await runIsolatedTextCall(
+		buildExtractionPrompt(content, prompt),
+		{ cwd, model, signal },
+	);
+
+	if (result.kind === "aborted") {
 		throw new Error("Summarization aborted");
 	}
+	if (result.kind === "text") return result.text;
 
-	// Create a minimal, isolated agent session for extraction.
-	// Isolation matters: createAgentSession by default re-loads project
-	// extensions, which would re-attach our own prompt rewriter and
-	// silently overwrite `setSystemPrompt("")` on the next agent loop.
-	const { session } = await createIsolatedSession({ cwd, model });
-
-	// Window between createAgentSession (async) and listener attachment —
-	// re-check so an abort that fired during session construction is not lost.
-	if (signal?.aborted) {
-		session.dispose();
-		throw new Error("Summarization aborted");
-	}
-
-	let abortHandler: (() => void) | null = null;
-	try {
-		// Wire abort signal. session.abort() returns a Promise; swallow rejections
-		// so a fire-and-forget abort cannot trigger an unhandled-rejection crash.
-		if (signal) {
-			abortHandler = () => {
-				void session.abort().catch(() => {
-					/* abort is best-effort */
-				});
-			};
-			signal.addEventListener("abort", abortHandler, { once: true });
-		}
-
-		// Set empty system prompt — extraction prompt is self-contained
-		session.agent.setSystemPrompt("");
-
-		// Run the extraction prompt
-		await session.prompt(buildExtractionPrompt(content, prompt));
-
-		// Extract the response
-		const text = lastAssistantText(session.messages);
-		if (text) return text;
-
-		// Fallback: return truncated raw content
-		console.error("[code-intel] Web content summarization produced no text output from model, returning truncated raw content");
-		return content.slice(0, SMALL_CONTENT_THRESHOLD) + "\n\n[Content summarization produced no output, showing truncated raw content]";
-	} finally {
-		if (signal && abortHandler) {
-			signal.removeEventListener("abort", abortHandler);
-		}
-		session.dispose();
-	}
+	console.error(
+		"[code-intel] Web content summarization produced no text output from model, returning truncated raw content",
+	);
+	return (
+		content.slice(0, SMALL_CONTENT_THRESHOLD) +
+		"\n\n[Content summarization produced no output, showing truncated raw content]"
+	);
 }

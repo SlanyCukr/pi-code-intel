@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import type { createAgentSession } from "@mariozechner/pi-coding-agent";
-import { createIsolatedSession } from "../isolated-session.js";
+import { runIsolatedTextCall } from "../utils/isolated-text-call.js";
 import type { AnyModel } from "../types.js";
 import { lastAssistantText } from "../utils/agent-messages.js";
 import { formatPercent, formatRatio } from "./format.js";
@@ -231,10 +230,8 @@ export function buildProposalPrompt(input: BuildProposalPromptInput): string {
  * generated markdown verbatim. The caller embeds it into section 5 of
  * the report.
  *
- * Mirrors the summarizer.ts pattern: createAgentSession with no tools,
- * empty system prompt, single-turn prompt, extract last assistant text.
- *
- * On failure (model unavailable, API error, abort), returns a markdown
+ * Delegates lifecycle + abort wiring to `runIsolatedTextCall`. On any
+ * failure (model unavailable, API error, abort) returns a markdown
  * error block rather than throwing — propose mode failure must not
  * abort the rest of the report.
  */
@@ -251,10 +248,6 @@ export async function generateProposals(
 		].join("\n");
 	}
 
-	if (options.signal?.aborted) {
-		return errorBlock("aborted before LLM call");
-	}
-
 	const flatHits: AntiPatternHit[] = [];
 	for (const arr of input.hitsBySession.values()) flatHits.push(...arr);
 
@@ -264,53 +257,32 @@ export async function generateProposals(
 		grounding,
 	});
 
-	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | null = null;
-	let abortHandler: (() => void) | null = null;
+	let result;
 	try {
-		// Isolated session: extensions/skills/prompts/themes are NOT loaded.
-		// Without this isolation, our own pi-code-intel prompt rewriter would
-		// re-attach to the inner session and clobber `setSystemPrompt("")`,
-		// turning what's meant to be a no-tools / empty-prompt single-turn
-		// call into a full coding-agent invocation.
-		({ session } = await createIsolatedSession({
+		result = await runIsolatedTextCall(userPrompt, {
 			cwd: options.cwd,
 			model: options.model,
-		}));
-
-		if (options.signal?.aborted) {
-			// `session?.dispose()` in the finally block handles cleanup.
-			return errorBlock("aborted during session setup");
-		}
-
-		if (options.signal) {
-			abortHandler = () => {
-				void session!.abort().catch(() => {
-					/* abort is best-effort */
-				});
-			};
-			options.signal.addEventListener("abort", abortHandler, { once: true });
-		}
-
-		session.agent.setSystemPrompt("");
-		await session.prompt(userPrompt);
-
-		const text = extractLastAssistantText(session.messages);
-		if (!text) return errorBlock("model produced no text output");
-
-		// Append a footer that records the grounding so the operator can
-		// audit which prompt was used.
-		const footer = renderGroundingFooter(grounding);
-		return text.endsWith("\n") ? text + footer : text + "\n\n" + footer;
+			signal: options.signal,
+		});
 	} catch (err) {
 		return errorBlock(
 			`LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
 		);
-	} finally {
-		if (options.signal && abortHandler) {
-			options.signal.removeEventListener("abort", abortHandler);
-		}
-		session?.dispose();
 	}
+
+	if (result.kind === "aborted") {
+		return errorBlock(
+			result.phase === "before"
+				? "aborted before LLM call"
+				: "aborted during session setup",
+		);
+	}
+	if (result.kind === "no-text") return errorBlock("model produced no text output");
+
+	const footer = renderGroundingFooter(grounding);
+	return result.text.endsWith("\n")
+		? result.text + footer
+		: result.text + "\n\n" + footer;
 }
 
 /**

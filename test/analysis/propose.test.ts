@@ -17,10 +17,9 @@ import type {
 	SessionHeader,
 } from "../../src/analysis/types.js";
 
-// Mock the isolation helper instead of the SDK directly. The propose
-// module's contract with pi-coding-agent now goes through this single
-// boundary, so mocking it isolates these tests from the resource-loader
-// machinery added for extension isolation.
+// Mock createIsolatedSession (the SDK boundary). The shared
+// runIsolatedTextCall helper lives in its own module so its abort and
+// lifecycle logic continues to run end-to-end through these tests.
 vi.mock("../../src/isolated-session.js", () => ({
 	createIsolatedSession: vi.fn(),
 }));

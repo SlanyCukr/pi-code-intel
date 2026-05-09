@@ -2,28 +2,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { groupTemplatesByCategory } from "../agents/templates.js";
+import { asExtendedApi } from "../sdk-api.js";
 import { getFrontmatterString, parseFrontmatter } from "../utils/frontmatter.js";
 import { loadMarkdownDir } from "../utils/templates.js";
-
-/**
- * Subset of the runtime ExtensionAPI we depend on.
- *
- * The pi SDK ships these methods but their type declarations vary across
- * minor versions; the explicit shape below isolates that volatility into one
- * place and avoids `pi as any` escape hatches everywhere we touch them.
- * `registerCommand` and `sendUserMessage` are guaranteed by peerDep
- * `>=0.62.0`. Older callers of `sendMessage` are no longer supported.
- */
-interface CommandRegistryApi {
-	registerCommand?(
-		name: string,
-		def: {
-			description: string;
-			handler: (args: string, ctx: { ui: { notify: (msg: string, level: string) => void } }) => unknown;
-		},
-	): void;
-	sendUserMessage?(text: string): void;
-}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -89,7 +70,7 @@ function loadCommandTemplates(): CommandTemplate[] {
  * fail.
  */
 export function registerCommands(pi: ExtensionAPI): void {
-	const api = pi as ExtensionAPI & CommandRegistryApi;
+	const api = asExtendedApi(pi);
 
 	if (typeof api.registerCommand !== "function") {
 		console.error(
