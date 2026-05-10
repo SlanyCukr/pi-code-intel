@@ -18,7 +18,34 @@ describe("buildSystemPrompt", () => {
 	it("includes identity/role section", () => {
 		const prompt = buildWith({});
 		expect(prompt).toContain("expert coding agent");
-		expect(prompt).toContain("Daneel");
+		expect(prompt).toContain("RFC 2119");
+	});
+
+	it("includes communication discipline sections", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("## Tone and style");
+		expect(prompt).toContain("MUST be short and concise");
+		expect(prompt).toContain("## Text output");
+		expect(prompt).toContain("End-of-turn summary: one or two sentences");
+		expect(prompt).toContain("## Autonomy");
+		expect(prompt).toContain("answer it yourself — do not ask the user");
+		expect(prompt).toContain("## Collaboration");
+	});
+
+	it("includes behavior discipline sections", () => {
+		const prompt = buildWith({});
+		expect(prompt).toContain("## Executing actions with care");
+		expect(prompt).toContain("## Simplicity first");
+		expect(prompt).toContain("## Surgical changes");
+		expect(prompt).toContain("## Goal-driven execution");
+		expect(prompt).toContain("## Refactoring workflow");
+	});
+
+	it("does NOT mention persona or priority ordering", () => {
+		const prompt = buildWith({});
+		expect(prompt).not.toContain("Daneel");
+		expect(prompt).not.toContain("malakh");
+		expect(prompt).not.toContain("Priority ordering");
 	});
 
 	it("includes active tools listing", () => {
@@ -97,8 +124,14 @@ describe("buildSystemPrompt", () => {
 	it("includes sub-agent delegation when agent in activeTools", () => {
 		const prompt = buildWith({ activeTools: [...DEFAULT_OPTS.activeTools, "agent"] });
 		expect(prompt).toContain("Sub-agent delegation");
-		expect(prompt).toContain("Briefing");
-		expect(prompt).toContain("Forward intelligence");
+		expect(prompt).toContain("### Briefing");
+		expect(prompt).toContain("### Closure");
+	});
+
+	it("does NOT include the deleted Forward Intelligence block in the sub-agent section", () => {
+		const prompt = buildWith({ activeTools: [...DEFAULT_OPTS.activeTools, "agent"] });
+		expect(prompt).not.toContain("### Forward intelligence");
+		expect(prompt).not.toContain("What the next step should know");
 	});
 
 	it("does NOT include sub-agent section when agent not in activeTools", () => {
