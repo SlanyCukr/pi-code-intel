@@ -82,6 +82,7 @@ Before searching for callers: "Do I have an anchor?" If yes, use incoming_calls 
 - Do NOT read entire files before trying document_symbols — get the table of contents first, then read only the relevant section
 - Do NOT chain read after read when LSP navigation can narrow the search — each unnecessary read burns tokens on code you don't need
 - Do NOT use grep when lsp can answer the same structural question — grep requires guessing keywords, lsp returns precise results
+- Do NOT use bash grep to locate symbol definitions or references when an LSP server is running — use \`workspace_symbols\` (to find a symbol by name) or \`references\` (to find usages of a known symbol). grep cannot distinguish definitions from comments or string literals; LSP can.
 </critical>
 
 <instruction>

@@ -54,6 +54,14 @@ describe("buildCodeExplorationGuidance", () => {
 			);
 		});
 
+		it("includes symbol-specific anti-grep rule pointing at workspace_symbols/references", () => {
+			expect(result).toContain(
+				"Do NOT use bash grep to locate symbol definitions or references",
+			);
+			expect(result).toContain("`workspace_symbols`");
+			expect(result).toContain("`references`");
+		});
+
 		it("includes pre-tool checkpoint", () => {
 			expect(result).toContain("Pre-tool checkpoint");
 		});

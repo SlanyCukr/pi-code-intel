@@ -245,6 +245,8 @@ Still use dedicated tools when they exist:
 </instruction>
 
 <contract>
+You MUST NOT use \`cat\`, \`head\`, \`tail\`, \`less\`, \`more\`, or \`bat\` via bash to view file contents — use the read tool instead. The read tool returns structured content with line numbers and handles binary/image detection; bash equivalents waste tokens on redundant formatting and bypass the tool-use contract. Piping (\`cat file | grep\`), redirects (\`cmd > file\`), heredocs, and \`tail -f\` for log monitoring are fine.
+
 You MUST NOT use sed, awk, or any bash command for in-place file editing. Use the edit tool for partial changes and write for full rewrites. sed/awk bypass the edit tool's exact-match guard, silently succeeding on stale content that edit would reject. Any bash command containing \`sed -i\` or \`awk -i inplace\` is a contract violation. Non-in-place sed/awk that pipes to a new file is fine.
 </contract>`;
 
@@ -289,7 +291,7 @@ function buildEditingSection(activeTools: string[]): string | null {
 		rules.push(
 			"You MUST read files before editing — edits match exact text, and without reading first you will guess wrong about whitespace, formatting, or surrounding context, causing the edit to fail",
 			"You SHOULD read immediately before editing if other tool calls have intervened since your last read of the target file (especially bash commands that may modify files via formatters/linters/codegen, or edits to other files that trigger watchers). Stale reads are the most common cause of edit failures.",
-			"When an edit fails because the old text did not match, do NOT re-read the entire file. Re-read only the narrow region around your intended change (use offset/limit), fix the old text, and retry — one read, one retry.",
+			"When an edit fails because the old text did not match, first check whether your own earlier edit in this turn changed the file — if so, your `oldText` is stale from your own prior edit; reconstruct the correct text from that edit and retry without re-reading. Otherwise, re-read only the narrow region around your intended change (use offset/limit), fix the old text, and retry — one read, one retry.",
 		);
 	}
 	if (has("edit")) {

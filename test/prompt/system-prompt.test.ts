@@ -84,6 +84,11 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("token efficiency");
 	});
 
+	it("includes MUST NOT directive against cat/head/tail for viewing files", () => {
+		const prompt = buildWith({});
+		expect(prompt).toMatch(/MUST NOT use `cat`, `head`, `tail`/);
+	});
+
 	it("does NOT include bash routing when bash not in activeTools", () => {
 		const prompt = buildWith({ activeTools: ["read", "edit"] });
 		expect(prompt).not.toContain("automatically compressed");
@@ -143,6 +148,12 @@ describe("buildSystemPrompt", () => {
 		const prompt = buildWith({ activeTools: ["read", "edit", "write"] });
 		expect(prompt).toContain("## Editing");
 		expect(prompt).toContain("MUST read files before editing");
+	});
+
+	it("edit-failure rule mentions reconstructing from your own prior edit", () => {
+		const prompt = buildWith({ activeTools: ["read", "edit"] });
+		expect(prompt).toContain("your own earlier edit in this turn");
+		expect(prompt).toContain("reconstruct the correct text");
 	});
 
 	it("does NOT include editing section when tools lack read and edit", () => {
