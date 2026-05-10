@@ -15,6 +15,7 @@
  */
 import { parseArgs } from "node:util";
 import { runAnalysis, parseDuration } from "./cli.js";
+import { RULE_IDS } from "./patterns/index.js";
 
 async function main(argv: string[]): Promise<number> {
 	let parsed: ReturnType<typeof parseArgs>;
@@ -27,7 +28,9 @@ async function main(argv: string[]): Promise<number> {
 				session: { type: "string" },
 				out: { type: "string" },
 				"no-write": { type: "boolean", default: false },
+				quiet: { type: "boolean", short: "q", default: false },
 				propose: { type: "boolean", default: false },
+				rules: { type: "string" },
 				help: { type: "boolean", short: "h", default: false },
 			},
 			allowPositionals: false,
@@ -59,6 +62,23 @@ async function main(argv: string[]): Promise<number> {
 		sinceMs = ms;
 	}
 
+	let rules: string[] | undefined;
+	if (typeof values.rules === "string") {
+		const requested = values.rules
+			.split(",")
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
+		const known = new Set<string>(RULE_IDS);
+		const unknown = requested.filter((id) => !known.has(id));
+		if (unknown.length > 0) {
+			console.error(
+				`[analyze-sessions] --rules: unknown rule id(s): ${unknown.join(", ")}.\nKnown rules: ${RULE_IDS.join(", ")}`,
+			);
+			return 2;
+		}
+		rules = requested;
+	}
+
 	const result = await runAnalysis({
 		cwd: typeof values.cwd === "string" ? values.cwd : process.cwd(),
 		sinceMs,
@@ -66,10 +86,13 @@ async function main(argv: string[]): Promise<number> {
 		out: typeof values.out === "string" ? values.out : undefined,
 		noWrite: values["no-write"] === true,
 		propose: values.propose === true,
+		rules,
 	});
 
-	process.stdout.write(result.reportMarkdown);
-	if (!result.reportMarkdown.endsWith("\n")) process.stdout.write("\n");
+	if (values.quiet !== true) {
+		process.stdout.write(result.reportMarkdown);
+		if (!result.reportMarkdown.endsWith("\n")) process.stdout.write("\n");
+	}
 
 	if (result.outPath) {
 		console.error(`[analyze-sessions] report written to ${result.outPath}`);
@@ -95,10 +118,20 @@ Options:
   --since <duration>    Filter to sessions newer than this. Forms: 7d,
                         24h, 30m, 2w. Default: all sessions.
   --session <id>        Filter to one specific session by UUID prefix
-                        (matches anywhere in the filename).
+                        (matches the UUID portion of the filename only;
+                        timestamps in the prefix are ignored).
   --out <path>          Override report output path. Default:
                         <cwd>/.pi/analyses/<YYYY-MM-DD>_<HHMMSS>.md
   --no-write            Print to stdout only; do not write to disk.
+  -q, --quiet           Suppress stdout output. Disk write still happens
+                        unless --no-write is also passed.
+  --rules <ids>         Comma-separated rule ids to keep in section 3
+                        and propose mode. Other rules' hits are dropped.
+                        Aggregated metrics are unaffected. Known rules:
+                        read-twice-no-edit, grep-for-symbol,
+                        read-after-document-symbols,
+                        edit-failure-then-reread, bash-sed-or-awk-edit,
+                        read-after-grep-same-file.
   --propose             Append section 5 with LLM-proposed prompt
                         amendments. Makes a real model call — the
                         model is selected from your pi settings or

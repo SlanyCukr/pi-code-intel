@@ -452,6 +452,131 @@ describe("runAnalysis", () => {
 		}
 	});
 
+	it("filters anti-pattern hits by --rules to the requested rule ids", async () => {
+		// Builds a session that triggers two distinct rules
+		// (read-twice-no-edit and bash-sed-or-awk-edit), then verifies
+		// runAnalysis with rules=[X] retains only X's hits in section 3.
+		const homeBackup = process.env.HOME;
+		process.env.HOME = tmp;
+		try {
+			const { fakeCwd, fakeSessionsRoot } = setupFakeHome(tmp);
+			const messages = [
+				{
+					type: "message",
+					id: "m1",
+					timestamp: "t",
+					message: {
+						role: "assistant",
+						content: [
+							{ type: "toolCall", id: "tc1", name: "read", arguments: { path: "x.ts" } },
+						],
+					},
+				},
+				{
+					type: "message",
+					id: "m2",
+					timestamp: "t",
+					message: {
+						role: "assistant",
+						content: [
+							{ type: "toolCall", id: "tc2", name: "read", arguments: { path: "x.ts" } },
+						],
+					},
+				},
+				{
+					type: "message",
+					id: "m3",
+					timestamp: "t",
+					message: {
+						role: "assistant",
+						content: [
+							{
+								type: "toolCall",
+								id: "tc3",
+								name: "bash",
+								arguments: { command: "sed -i 's/foo/bar/' x.ts" },
+							},
+						],
+					},
+				},
+			];
+			writeFakeSession(
+				fakeSessionsRoot,
+				fakeCwd,
+				"sess1.jsonl",
+				{ type: "session", version: 3, id: "u", timestamp: "t", cwd: fakeCwd },
+				messages,
+			);
+
+			// Baseline: no filter — both rules fire.
+			const all = await runAnalysis({ cwd: fakeCwd, noWrite: true });
+			expect(all.reportMarkdown).toContain("read-twice-no-edit");
+			expect(all.reportMarkdown).toContain("bash-sed-or-awk-edit");
+
+			// With --rules=read-twice-no-edit, only that rule's hits surface.
+			const filtered = await runAnalysis({
+				cwd: fakeCwd,
+				noWrite: true,
+				rules: ["read-twice-no-edit"],
+			});
+			expect(filtered.reportMarkdown).toContain("read-twice-no-edit");
+			expect(filtered.reportMarkdown).not.toContain("bash-sed-or-awk-edit");
+		} finally {
+			if (homeBackup === undefined) delete process.env.HOME;
+			else process.env.HOME = homeBackup;
+		}
+	});
+
+	it("--rules with an unknown id silently produces no hits (CLI validates upstream)", async () => {
+		// runAnalysis is permissive: unknown ids just match nothing. The
+		// cli-main.ts wrapper is what rejects unknown ids before we get
+		// here, so the behavior here is "filter applied, no hits survive".
+		const homeBackup = process.env.HOME;
+		process.env.HOME = tmp;
+		try {
+			const { fakeCwd, fakeSessionsRoot } = setupFakeHome(tmp);
+			writeFakeSession(
+				fakeSessionsRoot,
+				fakeCwd,
+				"sess1.jsonl",
+				{ type: "session", version: 3, id: "u", timestamp: "t", cwd: fakeCwd },
+				[
+					{
+						type: "message",
+						id: "m1",
+						timestamp: "t",
+						message: {
+							role: "assistant",
+							content: [
+								{ type: "toolCall", id: "tc1", name: "read", arguments: { path: "x.ts" } },
+							],
+						},
+					},
+					{
+						type: "message",
+						id: "m2",
+						timestamp: "t",
+						message: {
+							role: "assistant",
+							content: [
+								{ type: "toolCall", id: "tc2", name: "read", arguments: { path: "x.ts" } },
+							],
+						},
+					},
+				],
+			);
+			const result = await runAnalysis({
+				cwd: fakeCwd,
+				noWrite: true,
+				rules: ["definitely-not-a-real-rule"],
+			});
+			expect(result.reportMarkdown).not.toContain("read-twice-no-edit");
+		} finally {
+			if (homeBackup === undefined) delete process.env.HOME;
+			else process.env.HOME = homeBackup;
+		}
+	});
+
 	it("returns an empty-analysis report when the sessions directory does not exist", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;

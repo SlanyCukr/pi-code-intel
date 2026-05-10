@@ -42,6 +42,14 @@ export interface AnalysisArgs {
 	noWrite?: boolean;
 	/** When true, run the LLM-driven proposer and render section 5. */
 	propose?: boolean;
+	/**
+	 * When set, retain only hits whose `ruleId` is in this list. All rules
+	 * still run (cheap, pure functions); the filter applies post-hoc to
+	 * what surfaces in section 3 and what propose mode sees in section 5.
+	 * Aggregated metrics are unaffected — the operator still gets full
+	 * activity context even when narrowing focus to one rule.
+	 */
+	rules?: string[];
 }
 
 export interface AnalysisResult {
@@ -120,9 +128,14 @@ export async function runAnalysis(
 	}
 
 	const perSession = parsed.map(extractMetrics);
+	const ruleFilter = args.rules ? new Set(args.rules) : null;
 	const hitsBySession = new Map<string, AntiPatternHit[]>();
 	for (const session of parsed) {
-		hitsBySession.set(session.header.id, runAllRules(session));
+		const allHits = runAllRules(session);
+		const filtered = ruleFilter
+			? allHits.filter((h) => ruleFilter.has(h.ruleId))
+			: allHits;
+		hitsBySession.set(session.header.id, filtered);
 	}
 
 	// Outcome correlation runs per session. Each invocation may shell

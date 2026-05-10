@@ -21,6 +21,13 @@ use LSP before reaching for read.
 ### Read budget
 
 If you find yourself reading file after file, you are navigating by brute force. Each read returns an entire file section (~100-200 lines) when you often only need a single definition or call site. LSP can answer those questions with a single targeted call. Guideline: after your first read, ask yourself whether your next question could be answered by lsp instead of another read.
+
+Same-file re-read rule: you MUST NOT read the same file a second time (at any offset) unless one of the following has happened since the last read:
+- you edited or wrote to the file yourself
+- a bash command may have modified it (formatter, linter, codegen, build, mv/cp)
+- a sub-agent ran with edit/write tools
+
+If none of those apply, the file content in your context is still authoritative — use offset/limit on the next read to grab a different range, or use LSP (definition, references, document_symbols) to locate exactly what you need. Re-reading to "scroll" is always a wasted call.
 </contract>`);
 
 	// Navigation chain + anchor discipline + tool selection (single consolidated reference)
@@ -52,7 +59,12 @@ When you have an LSP anchor (file:line from any prior result), use the correspon
 
 ### Pre-tool checkpoint
 
-Before calling read: "Do I have an LSP anchor?" If yes, use lsp first.
+Before calling read: "Do I have an LSP anchor (file:line from grep, document_symbols, or a prior LSP result)?"
+- If the anchor matched a code identifier (function, class, variable, type), you MUST use the matching LSP operation (definition, hover, references) instead of read — grep output is already the anchor; do not grep then read the same file.
+- If the anchor matched a string literal, error message, comment, or other non-symbol text, the read is justified — but use offset/limit around the matched line, not a full-file read. LSP cannot navigate from non-symbol matches.
+
+Before grepping for a bare symbol name (function, class, variable, type): "Is this a code identifier?" If yes, use workspace_symbols (to find it) or references (if you already have an anchor) — not grep. grep is for string literals, config values, error messages, and patterns that are not language-level symbols.
+
 Before searching for callers: "Do I have an anchor?" If yes, use incoming_calls — not grep.
 
 ### When grep/find ARE the right choice

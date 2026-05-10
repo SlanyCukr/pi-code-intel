@@ -242,7 +242,11 @@ grep and find via bash automatically respect .gitignore (node_modules/, .next/, 
 Still use dedicated tools when they exist:
 - Read files: use the read tool (NOT cat/head/tail via bash) — read returns structured content, bash cat wastes tokens on formatting
 - Edit files: use the edit tool (NOT sed/awk via bash) — edit fails if the target text doesn't match, catching stale-file errors
-</instruction>`;
+</instruction>
+
+<contract>
+You MUST NOT use sed, awk, or any bash command for in-place file editing. Use the edit tool for partial changes and write for full rewrites. sed/awk bypass the edit tool's exact-match guard, silently succeeding on stale content that edit would reject. Any bash command containing \`sed -i\` or \`awk -i inplace\` is a contract violation. Non-in-place sed/awk that pipes to a new file is fine.
+</contract>`;
 
 // -- Web fetch guidance --
 
@@ -284,6 +288,8 @@ function buildEditingSection(activeTools: string[]): string | null {
 	if (has("read") && has("edit")) {
 		rules.push(
 			"You MUST read files before editing — edits match exact text, and without reading first you will guess wrong about whitespace, formatting, or surrounding context, causing the edit to fail",
+			"You SHOULD read immediately before editing if other tool calls have intervened since your last read of the target file (especially bash commands that may modify files via formatters/linters/codegen, or edits to other files that trigger watchers). Stale reads are the most common cause of edit failures.",
+			"When an edit fails because the old text did not match, do NOT re-read the entire file. Re-read only the narrow region around your intended change (use offset/limit), fix the old text, and retry — one read, one retry.",
 		);
 	}
 	if (has("edit")) {

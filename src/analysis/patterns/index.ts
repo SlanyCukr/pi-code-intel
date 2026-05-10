@@ -25,6 +25,21 @@ export const RULES: AntiPatternRule[] = [
 	readAfterGrepSameFile,
 ];
 
+/**
+ * Canonical rule IDs in the same order as `RULES`. MUST stay in sync with
+ * the `ruleId` literal each rule embeds in its hits — the CLI's `--rules`
+ * filter validates operator input against this list, so a stale entry
+ * here would silently allow or reject a legitimate filter value.
+ */
+export const RULE_IDS = [
+	"read-twice-no-edit",
+	"grep-for-symbol",
+	"read-after-document-symbols",
+	"edit-failure-then-reread",
+	"bash-sed-or-awk-edit",
+	"read-after-grep-same-file",
+] as const;
+
 export {
 	bashSedOrAwkEdit,
 	editFailureThenReread,
