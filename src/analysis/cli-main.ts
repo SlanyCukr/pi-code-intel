@@ -131,6 +131,7 @@ Options:
                         read-twice-no-edit, grep-for-symbol,
                         read-after-document-symbols,
                         edit-failure-then-reread, bash-sed-or-awk-edit,
+                        bash-cat-or-head-or-tail,
                         read-after-grep-same-file.
   --propose             Append section 5 with LLM-proposed prompt
                         amendments. Makes a real model call — the

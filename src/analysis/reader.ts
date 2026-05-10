@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { basename, dirname } from "node:path";
 import { SYSTEM_PROMPT_CUSTOM_TYPE } from "./capture.js";
 import type {
 	AnalysisEvent,
@@ -191,6 +192,7 @@ export function readSession(path: string): ParsedSession {
 		filePath: path,
 		totalEntries,
 		malformedLines,
+		isSubAgent: basename(dirname(path)) === "subagents",
 	};
 }
 

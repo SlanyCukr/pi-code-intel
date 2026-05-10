@@ -45,6 +45,7 @@ function makeSession(events: AnalysisEvent[], header: SessionHeader = HEADER): P
 		filePath: "/tmp/s.jsonl",
 		totalEntries: events.length,
 		malformedLines: 0,
+		isSubAgent: false,
 	};
 }
 

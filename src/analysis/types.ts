@@ -144,6 +144,15 @@ export interface ParsedSession {
 	/** Total entries seen (including ignored types like `label`, `custom`). */
 	totalEntries: number;
 	malformedLines: number;
+	/**
+	 * True when this session was spawned by a parent agent. Derived from
+	 * the file path: pi persists sub-agent sessions to
+	 * `<parent-session-dir>/subagents/<file>.jsonl` (see
+	 * `agents/runner.ts createSessionStorage`). Sub-agent sessions share
+	 * the parent's cwd, so outcome correlation skips them to avoid
+	 * double-counting commits against the same window.
+	 */
+	isSubAgent: boolean;
 }
 
 /**

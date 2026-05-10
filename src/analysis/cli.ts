@@ -142,8 +142,14 @@ export async function runAnalysis(
 	// out to git twice (commits-in-window + revert-search) against the
 	// session's cwd. For a one-off tool with N ≤ ~50 sessions this is
 	// fast enough; if it ever becomes hot we can hoist the revert search.
+	//
+	// Sub-agent sessions share the parent's cwd and overlap its time
+	// window — correlating them would attribute the parent's commits to
+	// every sub-agent that ran during the parent. Skip them entirely;
+	// the parent's outcome row already covers the work.
 	const outcomesBySession = new Map<string, OutcomeData>();
 	for (const session of parsed) {
+		if (session.isSubAgent) continue;
 		outcomesBySession.set(session.header.id, correlateOutcomes(session));
 	}
 
@@ -176,6 +182,7 @@ export async function runAnalysis(
 		hitsBySession,
 		outcomesBySession,
 		proposalsMarkdown,
+		parsedSessions: parsed,
 	});
 
 	let outPath: string | null = null;
@@ -263,6 +270,14 @@ export function resolveSessionsDir(cwd: string): string {
  * Sessions are ordered by mtime ascending (oldest first). This is the
  * order in which they were created, which makes the report's per-rule
  * sample listings naturally chronological.
+ *
+ * Also descends into one fixed subdirectory: `<sessionsDir>/subagents/`.
+ * Pi persists sub-agent sessions there (see
+ * `agents/runner.ts createSessionStorage`); without this descent the
+ * analyzer silently misses every delegated task. Sub-agents cannot
+ * themselves spawn nested agents (the agent tool is not registered when
+ * `isInSubAgent()` is true — see `extension.ts`), so one level is
+ * sufficient and we deliberately do not recurse further.
  */
 function listSessionFiles(sessionsDir: string, args: AnalysisArgs): string[] {
 	if (!existsSync(sessionsDir)) {
@@ -271,13 +286,21 @@ function listSessionFiles(sessionsDir: string, args: AnalysisArgs): string[] {
 
 	const cutoffMs = args.sinceMs !== undefined ? Date.now() - args.sinceMs : 0;
 
-	const entries = readdirSync(sessionsDir)
-		.filter((name) => name.endsWith(".jsonl"))
-		.map((name) => {
-			const full = join(sessionsDir, name);
-			const st = statSync(full);
-			return { full, name, mtimeMs: st.mtimeMs };
-		})
+	const collect = (dir: string): Array<{ full: string; name: string; mtimeMs: number }> =>
+		readdirSync(dir)
+			.filter((name) => name.endsWith(".jsonl"))
+			.map((name) => {
+				const full = join(dir, name);
+				const st = statSync(full);
+				return { full, name, mtimeMs: st.mtimeMs };
+			});
+
+	const all = collect(sessionsDir);
+	const subagentsDir = join(sessionsDir, "subagents");
+	if (existsSync(subagentsDir)) {
+		all.push(...collect(subagentsDir));
+	}
+	const entries = all
 		.filter(({ mtimeMs }) => mtimeMs >= cutoffMs)
 		.sort((a, b) => a.mtimeMs - b.mtimeMs);
 

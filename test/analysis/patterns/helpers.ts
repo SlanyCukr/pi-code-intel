@@ -31,6 +31,7 @@ export function makeSession(events: AnalysisEvent[]): ParsedSession {
 		filePath: "/tmp/s.jsonl",
 		totalEntries: events.length,
 		malformedLines: 0,
+		isSubAgent: false,
 	};
 }
 

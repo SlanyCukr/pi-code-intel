@@ -577,6 +577,57 @@ describe("runAnalysis", () => {
 		}
 	});
 
+	it("enumerates sub-agent sessions from <sessionsDir>/subagents/ and tags them", async () => {
+		// Regression: previously listSessionFiles did flat readdirSync and
+		// silently skipped the subagents/ subdir. Pi persists every
+		// delegated task there (see agents/runner.ts createSessionStorage),
+		// so without this descent N sub-agent sessions per delegating run
+		// were invisible to the analyzer.
+		const homeBackup = process.env.HOME;
+		process.env.HOME = tmp;
+		try {
+			const { fakeCwd, fakeSessionsRoot } = setupFakeHome(tmp);
+			// Top-level session.
+			writeFakeSession(
+				fakeSessionsRoot,
+				fakeCwd,
+				"top.jsonl",
+				{ type: "session", version: 3, id: "top-uuid", timestamp: "t", cwd: fakeCwd },
+				[],
+			);
+			// Sub-agent session at <encoded-cwd>/subagents/<file>.jsonl
+			const subagentsDir = join(
+				fakeSessionsRoot,
+				encodeSessionDirName(fakeCwd),
+				"subagents",
+			);
+			mkdirSync(subagentsDir, { recursive: true });
+			const subPath = join(subagentsDir, "sub.jsonl");
+			writeFileSync(
+				subPath,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "sub-uuid",
+					timestamp: "t",
+					cwd: fakeCwd,
+				}) + "\n",
+				"utf-8",
+			);
+
+			const result = await runAnalysis({ cwd: fakeCwd, noWrite: true });
+			expect(result.sessionFilesAnalyzed).toHaveLength(2);
+			expect(result.sessionFilesAnalyzed.some((p) => p.endsWith("/subagents/sub.jsonl"))).toBe(
+				true,
+			);
+			// Section 1 should disclose the sub-agent count.
+			expect(result.reportMarkdown).toContain("of which 1 are sub-agent sessions");
+		} finally {
+			if (homeBackup === undefined) delete process.env.HOME;
+			else process.env.HOME = homeBackup;
+		}
+	});
+
 	it("returns an empty-analysis report when the sessions directory does not exist", async () => {
 		const homeBackup = process.env.HOME;
 		process.env.HOME = tmp;

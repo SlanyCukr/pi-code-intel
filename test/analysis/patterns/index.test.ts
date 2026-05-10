@@ -10,8 +10,8 @@ import {
 } from "./helpers.js";
 
 describe("rule registry", () => {
-	it("registers all six rules", () => {
-		expect(RULES).toHaveLength(6);
+	it("registers all rules", () => {
+		expect(RULES).toHaveLength(7);
 	});
 });
 

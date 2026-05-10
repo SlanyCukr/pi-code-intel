@@ -4,7 +4,7 @@ import type {
 	SessionMetrics,
 } from "./metrics.js";
 import type { OutcomeData } from "./outcomes.js";
-import type { AntiPatternHit } from "./types.js";
+import type { AntiPatternHit, ParsedSession } from "./types.js";
 
 /**
  * Inputs to the markdown renderer. Optional sections (`outcomesBySession`,
@@ -27,6 +27,13 @@ export interface RenderInput {
 	 * the renderer drops it under the `## 5.` heading verbatim.
 	 */
 	proposalsMarkdown?: string;
+	/**
+	 * Parsed sessions, used to tag sub-agent counts in section 1.
+	 * Order matches `sessionMetrics` (one entry per parsed file). Optional
+	 * for tests that exercise the renderer in isolation; production
+	 * always passes the parsed array so the sub-agent disclosure renders.
+	 */
+	parsedSessions?: ParsedSession[];
 }
 
 /**
@@ -69,7 +76,12 @@ function renderSummary(input: RenderInput): string {
 		.map((m) => m.malformedLines)
 		.reduce((a, b) => a + b, 0);
 
-	lines.push(`- Sessions analyzed: **${sessionMetrics.length}**`);
+	const subAgentCount = (input.parsedSessions ?? []).filter((s) => s.isSubAgent).length;
+	const sessionsLabel =
+		subAgentCount > 0
+			? `**${sessionMetrics.length}** (of which ${subAgentCount} are sub-agent sessions)`
+			: `**${sessionMetrics.length}**`;
+	lines.push(`- Sessions analyzed: ${sessionsLabel}`);
 	lines.push(`- Total tool calls: **${aggregated.totalToolCalls}**`);
 	lines.push(`- Total tool errors: **${aggregated.totalToolErrors}**`);
 	lines.push(`- Combined wall-clock duration: **${totalDurMin.toFixed(1)} min**`);

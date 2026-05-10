@@ -1,4 +1,5 @@
 import type { AntiPatternRule } from "../types.js";
+import { bashCatOrHeadOrTail } from "./bash-cat-or-head-or-tail.js";
 import { bashSedOrAwkEdit } from "./bash-sed-or-awk-edit.js";
 import { editFailureThenReread } from "./edit-failure-then-reread.js";
 import { grepForSymbol } from "./grep-for-symbol.js";
@@ -22,6 +23,7 @@ export const RULES: AntiPatternRule[] = [
 	readAfterDocumentSymbols,
 	editFailureThenReread,
 	bashSedOrAwkEdit,
+	bashCatOrHeadOrTail,
 	readAfterGrepSameFile,
 ];
 
@@ -37,10 +39,12 @@ export const RULE_IDS = [
 	"read-after-document-symbols",
 	"edit-failure-then-reread",
 	"bash-sed-or-awk-edit",
+	"bash-cat-or-head-or-tail",
 	"read-after-grep-same-file",
 ] as const;
 
 export {
+	bashCatOrHeadOrTail,
 	bashSedOrAwkEdit,
 	editFailureThenReread,
 	grepForSymbol,

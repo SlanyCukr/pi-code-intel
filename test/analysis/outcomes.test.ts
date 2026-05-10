@@ -114,6 +114,7 @@ function makeSession(
 		filePath: "/tmp/s.jsonl",
 		totalEntries: events.length,
 		malformedLines: 0,
+		isSubAgent: false,
 	};
 }
 
@@ -388,6 +389,7 @@ describe("correlateOutcomes — write-fixture-then-fake-repo (no real git)", () 
 				filePath: "/tmp/s.jsonl",
 				totalEntries: 0,
 				malformedLines: 0,
+				isSubAgent: false,
 			};
 			const { runner, calls } = stubGit([
 				(args) =>
