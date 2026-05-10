@@ -176,6 +176,26 @@ describe("fetchUrl", () => {
 		await expect(fetchUrl("https://example.com/cancel", controller.signal)).rejects.toThrow("Fetch aborted");
 	});
 
+	it("honors external abort while streaming the response body", async () => {
+		const controller = new AbortController();
+		const body = new ReadableStream<Uint8Array>({
+			pull(streamController) {
+				controller.abort();
+				streamController.error(new DOMException("aborted", "AbortError"));
+			},
+		});
+		mockFetch.mockResolvedValueOnce(
+			new Response(body, {
+				status: 200,
+				headers: { "content-type": "text/plain" },
+			}),
+		);
+
+		await expect(
+			fetchUrl("https://example.com/stream-cancel", controller.signal),
+		).rejects.toThrow("Fetch aborted");
+	});
+
 	it("throws on oversized Content-Length header", async () => {
 		const response = new Response("small", {
 			status: 200,

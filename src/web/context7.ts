@@ -45,6 +45,16 @@ interface PendingRequest {
 	reject: (reason: Error) => void;
 }
 
+interface TextContentBlock {
+	type: "text";
+	text?: string;
+}
+
+interface Context7ToolResult {
+	content?: TextContentBlock[];
+	isError?: boolean;
+}
+
 /**
  * Pinned Context7 MCP server version.
  *
@@ -150,7 +160,7 @@ export class Context7Client {
 				protocolVersion: "2024-11-05",
 				capabilities: {},
 				clientInfo: { name: "pi-code-intel", version: "0.1.0" },
-			}, 60_000).promise; // 60s timeout: npx may need to download the package on first run
+			}, 60_000); // 60s timeout: npx may need to download the package on first run
 		} catch (err) {
 			this.stop();
 			throw new Error(
@@ -209,7 +219,11 @@ export class Context7Client {
 			if (!line) continue; // tolerate stray blank lines
 
 			try {
-				const msg = JSON.parse(line) as JsonRpcResponse;
+				const parsed = JSON.parse(line);
+				if (!isJsonRpcResponse(parsed)) {
+					throw new Error("message is not a JSON-RPC response");
+				}
+				const msg = parsed;
 				if (msg.id !== undefined) {
 					const pending = this.pending.get(msg.id);
 					if (pending) {
@@ -241,9 +255,17 @@ export class Context7Client {
 	}
 
 	/** Send a JSON-RPC request and wait for the response. Returns both the promise and the request ID. */
-	private sendRequest(method: string, params?: unknown, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): { id: number; promise: Promise<unknown> } {
+	private sendRequest(
+		method: string,
+		params?: unknown,
+		timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+		signal?: AbortSignal,
+	): Promise<unknown> {
 		if (!this.process?.stdin?.writable) {
-			return { id: -1, promise: Promise.reject(new Error("Context7 process not running")) };
+			return Promise.reject(new Error("Context7 process not running"));
+		}
+		if (signal?.aborted) {
+			return Promise.reject(new Error("Context7 call aborted"));
 		}
 
 		const id = this.nextId++;
@@ -258,20 +280,40 @@ export class Context7Client {
 		// emits raw newlines, so a single trailing `\n` is sufficient.
 		const body = JSON.stringify(request);
 
-		const promise = new Promise<unknown>((resolve, reject) => {
+		return new Promise<unknown>((resolve, reject) => {
+			let removeAbortListener: (() => void) | undefined;
+			const settleReject = (reason: Error) => {
+				removeAbortListener?.();
+				reject(reason);
+			};
+			const settleResolve = (value: unknown) => {
+				removeAbortListener?.();
+				resolve(value);
+			};
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
-				reject(new Error(`Context7 request ${method} timed out after ${timeoutMs}ms`));
+				settleReject(new Error(`Context7 request ${method} timed out after ${timeoutMs}ms`));
 			}, timeoutMs);
 
 			this.pending.set(id, {
-				resolve: (value) => { clearTimeout(timer); resolve(value); },
-				reject: (reason) => { clearTimeout(timer); reject(reason); },
+				resolve: (value) => { clearTimeout(timer); settleResolve(value); },
+				reject: (reason) => { clearTimeout(timer); settleReject(reason); },
 			});
+
+			if (signal) {
+				const handler = () => {
+					const pending = this.pending.get(id);
+					if (pending) {
+						this.pending.delete(id);
+						pending.reject(new Error("Context7 call aborted"));
+					}
+				};
+				signal.addEventListener("abort", handler, { once: true });
+				removeAbortListener = () => signal.removeEventListener("abort", handler);
+			}
+
 			this.process!.stdin!.write(`${body}\n`);
 		});
-
-		return { id, promise };
 	}
 
 	/** Send a JSON-RPC notification (no response expected). */
@@ -289,32 +331,7 @@ export class Context7Client {
 	/** Call an MCP tool by name. */
 	async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
 		await this.start();
-
-		// Reject early if already aborted
-		if (signal?.aborted) {
-			throw new Error("Context7 call aborted");
-		}
-
-		const { id, promise: resultPromise } = this.sendRequest("tools/call", { name, arguments: args });
-
-		if (!signal) return resultPromise;
-
-		// Race the request against the abort signal, cleaning up the pending entry on abort
-		return new Promise<unknown>((resolve, reject) => {
-			const handler = () => {
-				// Clean up the pending entry and its timer to prevent leaks
-				const pending = this.pending.get(id);
-				if (pending) {
-					this.pending.delete(id);
-					pending.reject(new Error("Context7 call aborted"));
-				}
-				reject(new Error("Context7 call aborted"));
-			};
-			signal.addEventListener("abort", handler, { once: true });
-			resultPromise
-				.then(resolve, reject)
-				.finally(() => signal.removeEventListener("abort", handler));
-		});
+		return this.sendRequest("tools/call", { name, arguments: args }, DEFAULT_REQUEST_TIMEOUT_MS, signal);
 	}
 
 	/**
@@ -330,23 +347,21 @@ export class Context7Client {
 		query: string,
 		signal?: AbortSignal,
 	): Promise<string | null> {
-		const result = (await this.callTool(
+		const result = await this.callTool(
 			"resolve-library-id",
 			{ libraryName: name, query },
 			signal,
-		)) as {
-			content?: Array<{ type: string; text?: string }>;
-			isError?: boolean;
-		};
+		);
+		const toolResult = parseContext7ToolResult(result);
 
-		if (result?.isError) {
-			const errText = result.content?.find((c) => c.type === "text")?.text;
+		if (toolResult.isError) {
+			const errText = findTextContent(toolResult);
 			throw new Error(
 				`Context7 resolve-library-id failed: ${errText ?? "unknown error"}`,
 			);
 		}
 
-		const text = result?.content?.find((c) => c.type === "text")?.text;
+		const text = findTextContent(toolResult);
 		if (!text) return null;
 
 		// Parse the response — Context7 returns a list of matching libraries.
@@ -375,23 +390,21 @@ export class Context7Client {
 		query: string,
 		signal?: AbortSignal,
 	): Promise<string> {
-		const result = (await this.callTool(
+		const result = await this.callTool(
 			"query-docs",
 			{ libraryId, query },
 			signal,
-		)) as {
-			content?: Array<{ type: string; text?: string }>;
-			isError?: boolean;
-		};
+		);
+		const toolResult = parseContext7ToolResult(result);
 
-		if (result?.isError) {
-			const errText = result.content?.find((c) => c.type === "text")?.text;
+		if (toolResult.isError) {
+			const errText = findTextContent(toolResult);
 			throw new Error(
 				`Context7 query-docs failed: ${errText ?? "unknown error"}`,
 			);
 		}
 
-		const text = result?.content?.find((c) => c.type === "text")?.text;
+		const text = findTextContent(toolResult);
 		return text ?? "No documentation found.";
 	}
 
@@ -415,6 +428,45 @@ export class Context7Client {
 			this.pending.clear();
 		}
 	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
+	if (!isRecord(value) || value.jsonrpc !== "2.0" || typeof value.id !== "number") {
+		return false;
+	}
+	if ("error" in value) {
+		const error = value.error;
+		return (
+			isRecord(error) &&
+			typeof error.code === "number" &&
+			typeof error.message === "string"
+		);
+	}
+	return "result" in value;
+}
+
+function parseContext7ToolResult(value: unknown): Context7ToolResult {
+	if (!isRecord(value)) return {};
+	const result: Context7ToolResult = {};
+	if (typeof value.isError === "boolean") result.isError = value.isError;
+	if (Array.isArray(value.content)) {
+		result.content = value.content.filter(isTextContentBlock);
+	}
+	return result;
+}
+
+function isTextContentBlock(value: unknown): value is TextContentBlock {
+	return isRecord(value) && value.type === "text" && (
+		value.text === undefined || typeof value.text === "string"
+	);
+}
+
+function findTextContent(result: Context7ToolResult): string | undefined {
+	return result.content?.find((c) => c.type === "text")?.text;
 }
 
 // -- Tool definition --
