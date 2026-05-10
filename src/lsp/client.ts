@@ -186,19 +186,25 @@ export class LspClientManager {
 	private refCount = 0;
 
 	/**
-	 * Get or create a singleton LspClientManager for the given cwd.
-	 * Subsequent calls with the same cwd return the same instance,
-	 * preventing duplicate LSP server processes across sub-agents.
+	 * Get or create a singleton LspClientManager for the given cwd without
+	 * changing its reference count.
 	 */
 	static getInstance(config: LspConfiguration, cwd: string): LspClientManager {
 		const existing = managerInstances.get(cwd);
-		if (existing) {
-			existing.refCount++;
-			return existing;
-		}
+		if (existing) return existing;
 		const manager = new LspClientManager(config, cwd);
-		manager.refCount = 1;
 		managerInstances.set(cwd, manager);
+		return manager;
+	}
+
+	/**
+	 * Acquire a shared manager reference. Every acquire must be paired with
+	 * `release()` so parent and sub-agent extension loads do not shut down
+	 * LSP processes still in use by another session.
+	 */
+	static acquire(config: LspConfiguration, cwd: string): LspClientManager {
+		const manager = LspClientManager.getInstance(config, cwd);
+		manager.refCount++;
 		return manager;
 	}
 
@@ -472,15 +478,12 @@ export class LspClientManager {
 		// Server notification (has method but no id)
 		const notification = message as JsonRpcNotification;
 		if (notification.method === "textDocument/publishDiagnostics") {
-			const params = notification.params as {
-				uri?: string;
-				diagnostics?: unknown[];
-			} | null;
-			if (params?.uri && Array.isArray(params.diagnostics)) {
-				client.diagnostics.set(
-					params.uri,
-					params.diagnostics as Diagnostic[],
-				);
+			const params = notification.params;
+			if (isRecord(params) && typeof params.uri === "string") {
+				const diagnostics = Array.isArray(params.diagnostics)
+					? params.diagnostics.filter(isDiagnostic)
+					: [];
+				client.diagnostics.set(params.uri, diagnostics);
 			}
 		}
 	}
@@ -778,6 +781,45 @@ export class LspClientManager {
 		this.clients.clear();
 		this.warmedUp = false;
 	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPosition(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		typeof value.line === "number" &&
+		typeof value.character === "number"
+	);
+}
+
+function isRange(value: unknown): boolean {
+	return isRecord(value) && isPosition(value.start) && isPosition(value.end);
+}
+
+function isDiagnostic(value: unknown): value is Diagnostic {
+	if (!isRecord(value) || !isRange(value.range) || typeof value.message !== "string") {
+		return false;
+	}
+	if (
+		value.severity !== undefined &&
+		typeof value.severity !== "number"
+	) {
+		return false;
+	}
+	if (
+		value.code !== undefined &&
+		typeof value.code !== "string" &&
+		typeof value.code !== "number"
+	) {
+		return false;
+	}
+	if (value.source !== undefined && typeof value.source !== "string") {
+		return false;
+	}
+	return true;
 }
 
 /**

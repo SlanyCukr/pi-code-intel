@@ -22,7 +22,7 @@ export function loadLspConfig(cwd: string): LspConfiguration {
 	let servers: Record<string, ServerConfig> = {};
 	try {
 		const raw = readFileSync(defaultsPath, "utf-8");
-		servers = JSON.parse(raw);
+		servers = parseServersObject(JSON.parse(raw), defaultsPath, {});
 	} catch (err) {
 		console.error(`[lsp] Failed to load built-in LSP defaults:`, err instanceof Error ? err.message : err);
 	}
@@ -51,16 +51,65 @@ function mergeConfigFile(
 	try {
 		const raw = readFileSync(configPath, "utf-8");
 		const config = JSON.parse(raw);
-		if (config && typeof config === "object") {
-			for (const [name, server] of Object.entries(config)) {
-				if (server && typeof server === "object") {
-					servers[name] = { ...servers[name], ...(server as ServerConfig) };
-				}
-			}
-		}
+		Object.assign(servers, parseServersObject(config, configPath, servers));
 	} catch (err) {
 		console.error(`[lsp] Failed to load config from ${configPath}:`, err instanceof Error ? err.message : err);
 	}
+}
+
+function parseServersObject(
+	value: unknown,
+	sourcePath: string,
+	existing: Record<string, ServerConfig>,
+): Record<string, ServerConfig> {
+	const parsed: Record<string, ServerConfig> = {};
+	if (!isRecord(value)) return parsed;
+
+	for (const [name, rawServer] of Object.entries(value)) {
+		if (!isRecord(rawServer)) continue;
+		const merged = { ...(existing[name] ?? {}), ...rawServer };
+		const normalized = normalizeServerConfig(merged);
+		if (normalized) {
+			parsed[name] = normalized;
+		} else {
+			console.error(`[lsp] Ignoring invalid server config '${name}' from ${sourcePath}`);
+		}
+	}
+	return parsed;
+}
+
+function normalizeServerConfig(value: Record<string, unknown>): ServerConfig | null {
+	if (
+		typeof value.command !== "string" ||
+		!isStringArray(value.fileTypes) ||
+		!isStringArray(value.rootMarkers)
+	) {
+		return null;
+	}
+
+	const config: ServerConfig = {
+		command: value.command,
+		fileTypes: value.fileTypes,
+		rootMarkers: value.rootMarkers,
+	};
+	if (isStringArray(value.args)) config.args = value.args;
+	if (isRecord(value.settings)) config.settings = value.settings;
+	if (isRecord(value.initOptions)) config.initOptions = value.initOptions;
+	if (typeof value.isLinter === "boolean") config.isLinter = value.isLinter;
+	if (isStringRecord(value.env)) config.env = value.env;
+	return config;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return isRecord(value) && Object.values(value).every((item) => typeof item === "string");
 }
 
 /**

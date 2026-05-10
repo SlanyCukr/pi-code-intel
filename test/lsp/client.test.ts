@@ -244,7 +244,7 @@ describe("LspClientManager exit-handler race", () => {
 			fileTypes: [".ts"],
 		};
 		const config = { servers: { fake: serverConfig } };
-		// Unique cwd per test so getInstance does not return a singleton from
+		// Unique cwd per test so acquire does not return a singleton from
 		// another test run.
 		const cwd = `${tmpdir()}/lsp-race-test-${Date.now()}-${Math.random()}`;
 
@@ -253,7 +253,7 @@ describe("LspClientManager exit-handler race", () => {
 		spawnMock.mockReturnValueOnce(childA).mockReturnValueOnce(childB);
 
 		// biome-ignore lint/suspicious/noExplicitAny: test-only access to private state
-		const manager = LspClientManager.getInstance(config as any, cwd);
+		const manager = LspClientManager.acquire(config as any, cwd);
 
 		try {
 			// --- First attempt: init fails ---
@@ -298,6 +298,77 @@ describe("LspClientManager exit-handler race", () => {
 			// Cleanly terminate child B before release() so shutdownClient does
 			// not wait 5s for an LSP shutdown response from a fake process.
 			childB.emit("exit", 0);
+		} finally {
+			await manager.release();
+		}
+	});
+});
+
+describe("LspClientManager diagnostics parsing", () => {
+	beforeEach(() => {
+		spawnMock.mockReset();
+	});
+
+	it("filters malformed diagnostics from publishDiagnostics notifications", async () => {
+		const serverConfig = {
+			command: "fake-lsp",
+			args: [],
+			rootMarkers: [],
+			fileTypes: [".ts"],
+		};
+		const config = { servers: { fake: serverConfig } };
+		const cwd = `${tmpdir()}/lsp-diagnostics-test-${Date.now()}-${Math.random()}`;
+		const child = makeFakeChild();
+		spawnMock.mockReturnValueOnce(child);
+		// biome-ignore lint/suspicious/noExplicitAny: test-only access to private state
+		const manager = LspClientManager.acquire(config as any, cwd);
+
+		try {
+			const seenId = nextInitializeId(child.stdin);
+			const client = manager.getOrCreate(
+				"fake",
+				// biome-ignore lint/suspicious/noExplicitAny: test-only
+				serverConfig as any,
+			);
+			const id = await seenId;
+			writeLspMessage(child.stdout, {
+				jsonrpc: "2.0",
+				id,
+				result: { capabilities: {} },
+			});
+			const lspClient = await client;
+
+			writeLspMessage(child.stdout, {
+				jsonrpc: "2.0",
+				method: "textDocument/publishDiagnostics",
+				params: {
+					uri: "file:///tmp/example.ts",
+					diagnostics: [
+						{
+							range: {
+								start: { line: 1, character: 2 },
+								end: { line: 1, character: 5 },
+							},
+							message: "valid diagnostic",
+							severity: 1,
+						},
+						{ message: "missing range" },
+						{
+							range: {
+								start: { line: "bad", character: 0 },
+								end: { line: 1, character: 5 },
+							},
+							message: "bad position",
+						},
+					],
+				},
+			});
+
+			const diagnostics = manager.getDiagnostics(lspClient);
+			expect(diagnostics.get("file:///tmp/example.ts")).toEqual([
+				expect.objectContaining({ message: "valid diagnostic" }),
+			]);
+			child.emit("exit", 0);
 		} finally {
 			await manager.release();
 		}

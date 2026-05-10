@@ -264,6 +264,42 @@ describe("Context7Client", () => {
 		client.stop();
 	});
 
+	it("ignores malformed Context7 tool result content instead of asserting it is text", async () => {
+		const proc = createMockProcess();
+		mockSpawn.mockReturnValueOnce(proc as any);
+
+		const client = new Context7Client();
+		const startPromise = client.start();
+
+		await waitForWrite(proc.stdin.write, 1);
+		const initWritten = proc.stdin.write.mock.calls[0][0] as string;
+		const initReq = JSON.parse(initWritten);
+		proc.stdout.emit(
+			"data",
+			Buffer.from(frameMessage({ jsonrpc: "2.0", id: initReq.id, result: {} })),
+		);
+		await startPromise;
+
+		const resolvePromise = client.resolveLibrary("express", "middleware");
+
+		await waitForWrite(proc.stdin.write, 3);
+		const toolWritten = proc.stdin.write.mock.calls[2][0] as string;
+		const toolReq = JSON.parse(toolWritten);
+		proc.stdout.emit(
+			"data",
+			Buffer.from(
+				frameMessage({
+					jsonrpc: "2.0",
+					id: toolReq.id,
+					result: { content: [{ type: "image", data: "ignored" }] },
+				}),
+			),
+		);
+
+		await expect(resolvePromise).resolves.toBeNull();
+		client.stop();
+	});
+
 	it("stop kills the process and rejects pending requests", () => {
 		const proc = createMockProcess();
 		mockSpawn.mockReturnValueOnce(proc as any);

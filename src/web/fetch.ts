@@ -166,16 +166,7 @@ export async function fetchUrl(
 	url: string,
 	signal?: AbortSignal,
 ): Promise<FetchResult> {
-	// Validate URL
-	let parsed: URL;
-	try {
-		parsed = new URL(url);
-	} catch {
-		throw new Error(`Invalid URL: ${url}`);
-	}
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new Error(`Only HTTP/HTTPS URLs are supported: ${url}`);
-	}
+	const parsed = parseHttpUrl(url);
 
 	// Set up the abort + timeout envelope FIRST so that everything below —
 	// the early SSRF DNS lookup, cache eviction, the redirect loop — is
@@ -192,11 +183,6 @@ export async function fetchUrl(
 		removeSignalListener = () => signal.removeEventListener("abort", handler);
 	}
 
-	// Manual redirect following: `fetch`'s built-in `redirect: "follow"` would
-	// silently chase a 302 from a public host into a private one (e.g.
-	// 169.254.169.254), bypassing the SSRF guard. We follow redirects ourselves
-	// and re-validate every hop.
-	let response: Response;
 	try {
 		// SSRF guard — rejects loopback/private/link-local before any network
 		// I/O. Per-hop validation also runs inside the redirect loop below; this
@@ -207,164 +193,216 @@ export async function fetchUrl(
 		evictStaleEntries();
 		const cached = cache.get(url);
 		if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-			clearTimeout(timeout);
 			return cached.result;
 		}
 
-		let currentUrl = parsed;
-		let redirectCount = 0;
-		while (true) {
-			let hop: Response;
-			try {
-				hop = await fetch(currentUrl.href, {
-					signal: controller.signal,
-					headers: {
-						"Accept":
-							"text/markdown, text/html, application/json, text/plain, */*",
-						"User-Agent": "pi-code-intel/1.0 (coding agent)",
-					},
-					redirect: "manual",
-				});
-			} catch (err) {
-				if (err instanceof DOMException && err.name === "AbortError") {
-					if (signal?.aborted) {
-						throw new Error(`Fetch aborted: ${url}`);
-					}
-					throw new Error(
-						`Fetch timed out after ${FETCH_TIMEOUT_MS}ms: ${url}`,
-					);
-				}
-				throw new Error(
-					`Fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
+		const response = await fetchWithManualRedirects(parsed, url, controller.signal, signal);
 
-			const isRedirect =
-				hop.status === 301 ||
-				hop.status === 302 ||
-				hop.status === 303 ||
-				hop.status === 307 ||
-				hop.status === 308;
-
-			if (!isRedirect) {
-				response = hop;
-				break;
-			}
-
-			const location = hop.headers.get("location");
-			// Drain the redirect body so the underlying connection can be reused
-			// or freed promptly. Errors from cancel are not actionable.
-			try {
-				await hop.body?.cancel();
-			} catch {
-				/* ignore */
-			}
-
-			if (!location) {
-				throw new Error(
-					`Redirect ${hop.status} from ${currentUrl.href} missing Location header`,
-				);
-			}
-			if (++redirectCount > MAX_REDIRECTS) {
-				throw new Error(
-					`Too many redirects (> ${MAX_REDIRECTS}) starting at: ${url}`,
-				);
-			}
-
-			let nextUrl: URL;
-			try {
-				nextUrl = new URL(location, currentUrl);
-			} catch {
-				throw new Error(
-					`Invalid redirect Location from ${currentUrl.href}: ${location}`,
-				);
-			}
-			if (nextUrl.protocol !== "http:" && nextUrl.protocol !== "https:") {
-				throw new Error(
-					`Refusing redirect to non-HTTP scheme: ${nextUrl.href}`,
-				);
-			}
-
-			// Re-run the SSRF guard against the new target before issuing the
-			// next fetch. This is the whole point of `redirect: "manual"`.
-			await assertSafeUrl(nextUrl, signal);
-			currentUrl = nextUrl;
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status} ${response.statusText}: ${url}`);
 		}
+
+		// Stream body with size limit — abort the moment cumulative bytes exceed
+		// MAX_RESPONSE_BYTES so we never buffer an unbounded response. The fetch
+		// timeout remains active to protect against a server drip-feeding bytes.
+		const contentType = response.headers.get("content-type") ?? "text/plain";
+		const contentLength = response.headers.get("content-length");
+		if (contentLength && Number.parseInt(contentLength) > MAX_RESPONSE_BYTES) {
+			throw new Error(
+				`Response too large (${contentLength} bytes, max ${MAX_RESPONSE_BYTES}): ${url}`,
+			);
+		}
+
+		const rawText = await readResponseText(response, url, controller, signal);
+		let content = convertResponseContent(rawText, contentType, url);
+
+		// Truncate
+		let truncated = false;
+		if (content.length > MAX_CONTENT_LENGTH) {
+			content = `${content.slice(0, MAX_CONTENT_LENGTH)}\n\n[Content truncated due to length...]`;
+			truncated = true;
+		}
+
+		const result: FetchResult = { content, contentType, truncated };
+
+		// Cache result
+		cache.set(url, { result, ts: Date.now() });
+
+		return result;
 	} finally {
 		removeSignalListener?.();
-	}
-
-	if (!response.ok) {
 		clearTimeout(timeout);
-		throw new Error(`HTTP ${response.status} ${response.statusText}: ${url}`);
 	}
+}
 
-	// Stream body with size limit — abort the moment cumulative bytes exceed
-	// MAX_RESPONSE_BYTES so we never buffer an unbounded response. The fetch
-	// timeout remains active to protect against a server drip-feeding bytes.
-	const contentType = response.headers.get("content-type") ?? "text/plain";
-	const contentLength = response.headers.get("content-length");
-	if (contentLength && Number.parseInt(contentLength) > MAX_RESPONSE_BYTES) {
-		clearTimeout(timeout);
-		throw new Error(`Response too large (${contentLength} bytes, max ${MAX_RESPONSE_BYTES}): ${url}`);
+function parseHttpUrl(url: string): URL {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new Error(`Invalid URL: ${url}`);
 	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		throw new Error(`Only HTTP/HTTPS URLs are supported: ${url}`);
+	}
+	return parsed;
+}
 
-	let rawText: string;
+// Manual redirect following: `fetch`'s built-in `redirect: "follow"` would
+// silently chase a 302 from a public host into a private one (e.g.
+// 169.254.169.254), bypassing the SSRF guard. We follow redirects ourselves
+// and re-validate every hop.
+async function fetchWithManualRedirects(
+	initialUrl: URL,
+	originalUrl: string,
+	signal: AbortSignal,
+	externalSignal?: AbortSignal,
+): Promise<Response> {
+	let currentUrl = initialUrl;
+	let redirectCount = 0;
+	while (true) {
+		const hop = await fetchHop(currentUrl, originalUrl, signal, externalSignal);
+
+		if (!isRedirectStatus(hop.status)) {
+			return hop;
+		}
+
+		const location = hop.headers.get("location");
+		await drainRedirectBody(hop);
+
+		if (!location) {
+			throw new Error(
+				`Redirect ${hop.status} from ${currentUrl.href} missing Location header`,
+			);
+		}
+		if (++redirectCount > MAX_REDIRECTS) {
+			throw new Error(
+				`Too many redirects (> ${MAX_REDIRECTS}) starting at: ${originalUrl}`,
+			);
+		}
+
+		currentUrl = parseRedirectUrl(location, currentUrl);
+		// Re-run the SSRF guard against the new target before issuing the
+		// next fetch. This is the whole point of `redirect: "manual"`.
+		await assertSafeUrl(currentUrl, externalSignal);
+	}
+}
+
+async function fetchHop(
+	currentUrl: URL,
+	originalUrl: string,
+	signal: AbortSignal,
+	externalSignal?: AbortSignal,
+): Promise<Response> {
+	try {
+		return await fetch(currentUrl.href, {
+			signal,
+			headers: {
+				"Accept": "text/markdown, text/html, application/json, text/plain, */*",
+				"User-Agent": "pi-code-intel/1.0 (coding agent)",
+			},
+			redirect: "manual",
+		});
+	} catch (err) {
+		if (err instanceof DOMException && err.name === "AbortError") {
+			if (externalSignal?.aborted) {
+				throw new Error(`Fetch aborted: ${originalUrl}`);
+			}
+			throw new Error(
+				`Fetch timed out after ${FETCH_TIMEOUT_MS}ms: ${originalUrl}`,
+			);
+		}
+		throw new Error(
+			`Fetch failed for ${originalUrl}: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+}
+
+function isRedirectStatus(status: number): boolean {
+	return (
+		status === 301 ||
+		status === 302 ||
+		status === 303 ||
+		status === 307 ||
+		status === 308
+	);
+}
+
+async function drainRedirectBody(response: Response): Promise<void> {
+	try {
+		await response.body?.cancel();
+	} catch {
+		/* ignore */
+	}
+}
+
+function parseRedirectUrl(location: string, currentUrl: URL): URL {
+	let nextUrl: URL;
+	try {
+		nextUrl = new URL(location, currentUrl);
+	} catch {
+		throw new Error(
+			`Invalid redirect Location from ${currentUrl.href}: ${location}`,
+		);
+	}
+	if (nextUrl.protocol !== "http:" && nextUrl.protocol !== "https:") {
+		throw new Error(`Refusing redirect to non-HTTP scheme: ${nextUrl.href}`);
+	}
+	return nextUrl;
+}
+
+async function readResponseText(
+	response: Response,
+	url: string,
+	controller: AbortController,
+	externalSignal?: AbortSignal,
+): Promise<string> {
 	try {
 		if (!response.body) {
-			rawText = "";
-		} else {
-			const chunks: Buffer[] = [];
-			let total = 0;
-			for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
-				total += chunk.byteLength;
-				if (total > MAX_RESPONSE_BYTES) {
-					controller.abort();
-					throw new Error(
-						`Response too large (> ${MAX_RESPONSE_BYTES} bytes): ${url}`,
-					);
-				}
-				chunks.push(Buffer.from(chunk));
-			}
-			rawText = Buffer.concat(chunks).toString("utf-8");
+			return "";
 		}
-	} finally {
-		clearTimeout(timeout);
+		const chunks: Buffer[] = [];
+		let total = 0;
+		for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+			total += chunk.byteLength;
+			if (total > MAX_RESPONSE_BYTES) {
+				controller.abort();
+				throw new Error(`Response too large (> ${MAX_RESPONSE_BYTES} bytes): ${url}`);
+			}
+			chunks.push(Buffer.from(chunk));
+		}
+		return Buffer.concat(chunks).toString("utf-8");
+	} catch (err) {
+		if (err instanceof DOMException && err.name === "AbortError") {
+			if (externalSignal?.aborted) {
+				throw new Error(`Fetch aborted: ${url}`);
+			}
+			throw new Error(`Fetch timed out after ${FETCH_TIMEOUT_MS}ms: ${url}`);
+		}
+		throw err;
 	}
+}
 
-	// Convert based on content type
-	let content: string;
+function convertResponseContent(
+	rawText: string,
+	contentType: string,
+	url: string,
+): string {
 	if (contentType.includes("application/json")) {
-		// JSON: pretty-print for readability
 		try {
-			content = JSON.stringify(JSON.parse(rawText), null, 2);
+			return JSON.stringify(JSON.parse(rawText), null, 2);
 		} catch (parseErr) {
 			console.error(
 				`[code-intel] Response declared as JSON but failed to parse (${url}):`,
 				parseErr instanceof Error ? parseErr.message : parseErr,
 			);
-			content = rawText;
+			return rawText;
 		}
-	} else if (contentType.includes("text/html")) {
-		content = htmlToMarkdown(rawText);
-	} else {
-		// Plain text, markdown, etc.
-		content = rawText;
 	}
-
-	// Truncate
-	let truncated = false;
-	if (content.length > MAX_CONTENT_LENGTH) {
-		content = `${content.slice(0, MAX_CONTENT_LENGTH)}\n\n[Content truncated due to length...]`;
-		truncated = true;
+	if (contentType.includes("text/html")) {
+		return htmlToMarkdown(rawText);
 	}
-
-	const result: FetchResult = { content, contentType, truncated };
-
-	// Cache result
-	cache.set(url, { result, ts: Date.now() });
-
-	return result;
+	return rawText;
 }
 
 /** Clear the fetch cache. Exposed for testing. */

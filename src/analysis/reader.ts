@@ -9,11 +9,12 @@ import type {
 	ParsedSession,
 	SessionHeader,
 	SystemPromptCapturedEvent,
-	ToolCallBlock,
 	ToolCallEvent,
 	ToolResultEvent,
 	UserMessageEvent,
 } from "./types.js";
+
+type JsonObject = Record<string, unknown>;
 
 /**
  * Read and parse one session JSONL file into typed events.
@@ -53,15 +54,9 @@ export function readSession(path: string): ParsedSession {
 
 		const lineNumber = i + 1; // 1-based for human-readable references
 
-		// Pi session JSONL is a permissive event format that includes 6+
-		// `type` discriminants with mostly disjoint payloads. The reader
-		// hand-narrows each branch via `typeof`/`Array.isArray` checks below,
-		// so the parsed object is typed `any` here rather than carrying a
-		// large precarious union — every field is validated at the use site.
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		let entry: any;
+		let parsed: unknown;
 		try {
-			entry = JSON.parse(line);
+			parsed = JSON.parse(line);
 		} catch (err) {
 			malformedLines++;
 			console.error(
@@ -72,6 +67,15 @@ export function readSession(path: string): ParsedSession {
 			continue;
 		}
 
+		if (!isJsonObject(parsed)) {
+			malformedLines++;
+			console.error(
+				`[analyze-sessions] ${path}:${lineNumber}: skipping non-object JSON entry`,
+			);
+			continue;
+		}
+
+		const entry = parsed;
 		const type = entry?.type;
 		if (typeof type !== "string") {
 			malformedLines++;
@@ -92,11 +96,12 @@ export function readSession(path: string): ParsedSession {
 			}
 			header = {
 				type: "session",
-				version: entry.version,
+				version: typeof entry.version === "number" ? entry.version : undefined,
 				id: String(entry.id ?? ""),
 				cwd: String(entry.cwd ?? ""),
 				timestamp: String(entry.timestamp ?? ""),
-				parentSession: entry.parentSession,
+				parentSession:
+					typeof entry.parentSession === "string" ? entry.parentSession : undefined,
 			};
 			continue;
 		}
@@ -143,7 +148,7 @@ export function readSession(path: string): ParsedSession {
 				// system prompt that was in effect at this point in the session.
 				if (entry.customType === SYSTEM_PROMPT_CUSTOM_TYPE) {
 					const data = entry.data;
-					if (data && typeof data === "object") {
+					if (isJsonObject(data)) {
 						const text = typeof data.text === "string" ? data.text : "";
 						const hash = typeof data.hash === "string" ? data.hash : "";
 						const capturedAt =
@@ -211,17 +216,14 @@ export function readSession(path: string): ParsedSession {
  *   tool use that the analyzer measures.
  */
 function expandMessageEntry(
-	// Same any-typed entry as the reader's main loop; see the comment there
-	// for the rationale. Each branch below validates the fields it consumes.
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	entry: any,
+	entry: JsonObject,
 	lineNumber: number,
 	entryId: string,
 	timestamp: string,
 	events: AnalysisEvent[],
 ): void {
 	const message = entry.message;
-	if (!message || typeof message !== "object") return;
+	if (!isJsonObject(message)) return;
 
 	const role = message.role;
 	switch (role) {
@@ -243,20 +245,19 @@ function expandMessageEntry(
 				pendingText = [];
 			};
 			for (const block of content) {
-				if (!block || typeof block !== "object") continue;
+				if (!isJsonObject(block)) continue;
 				if (block.type === "text" && typeof block.text === "string") {
 					pendingText.push(block.text);
 				} else if (block.type === "toolCall") {
 					flushText();
-					const tc = block as ToolCallBlock;
 					events.push({
 						kind: "tool_call",
 						entryId,
 						lineNumber,
 						timestamp,
-						toolCallId: String(tc.id ?? ""),
-						name: String(tc.name ?? ""),
-						arguments: (tc.arguments ?? {}) as Record<string, unknown>,
+						toolCallId: String(block.id ?? ""),
+						name: String(block.name ?? ""),
+						arguments: toRecord(block.arguments),
 					} satisfies ToolCallEvent);
 				}
 				// `thinking` blocks are intentionally not surfaced.
@@ -300,11 +301,19 @@ function flattenContentText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	const parts: string[] = [];
-	for (const block of content as Array<{ type?: unknown; text?: unknown }>) {
-		if (block && typeof block === "object" && block.type === "text") {
+	for (const block of content) {
+		if (isJsonObject(block) && block.type === "text") {
 			const t = block.text;
 			if (typeof t === "string") parts.push(t);
 		}
 	}
 	return parts.join("");
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+	return isJsonObject(value) ? value : {};
 }

@@ -104,7 +104,7 @@ const piCodeIntel: ExtensionFactory = (pi: ExtensionAPI): void => {
 	let lspTool = null;
 	if (config.lsp.enabled) {
 		const lspConfig = loadLspConfig(cwd);
-		const manager = LspClientManager.getInstance(lspConfig, cwd);
+		const manager = LspClientManager.acquire(lspConfig, cwd);
 		lspManager = manager;
 		lspTool = createLspTool(manager, cwd);
 		pi.registerTool(lspTool);

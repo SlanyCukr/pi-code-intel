@@ -165,4 +165,50 @@ describe("loadLspConfig", () => {
 		expect(config.servers["rust-analyzer"]).toBeDefined();
 		expect(config.servers["pyright"]).toBeDefined();
 	});
+
+	it("ignores project server entries missing required fields", () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "lsp-invalid-config-"));
+		try {
+			mkdirSync(join(projectDir, ".pi"));
+			writeFileSync(
+				join(projectDir, ".pi", "lsp.json"),
+				JSON.stringify({
+					invalid: {
+						command: "bad-lsp",
+						fileTypes: [".bad"],
+						// rootMarkers intentionally missing
+					},
+				}),
+			);
+
+			const config = loadLspConfig(projectDir);
+
+			expect(config.servers.invalid).toBeUndefined();
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
+	it("preserves an existing server when an override has invalid required fields", () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "lsp-invalid-override-"));
+		try {
+			mkdirSync(join(projectDir, ".pi"));
+			writeFileSync(
+				join(projectDir, ".pi", "lsp.json"),
+				JSON.stringify({
+					"typescript-language-server": {
+						command: 42,
+					},
+				}),
+			);
+
+			const config = loadLspConfig(projectDir);
+
+			expect(config.servers["typescript-language-server"].command).toBe(
+				"typescript-language-server",
+			);
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
 });

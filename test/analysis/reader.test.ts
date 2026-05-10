@@ -188,6 +188,21 @@ describe("readSession", () => {
 		expect(result.events).toHaveLength(0);
 	});
 
+	it("skips non-object JSON entries", () => {
+		const path = writeSessionFile(
+			tmp,
+			`${JSON.stringify(HEADER)}\n42\n${JSON.stringify({
+				type: "message",
+				id: "m1",
+				timestamp: "t",
+				message: { role: "user", content: "hi" },
+			})}\n`,
+		);
+		const result = readSession(path);
+		expect(result.malformedLines).toBe(1);
+		expect(result.events).toHaveLength(1);
+	});
+
 	it("tolerates and ignores unknown entry types for forward compatibility", () => {
 		const path = writeSessionFile(
 			tmp,
