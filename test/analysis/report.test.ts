@@ -22,13 +22,14 @@ const HEADER: SessionHeader = {
 	timestamp: "2026-05-08T10:00:00.000Z",
 };
 
-function makeSession(events: AnalysisEvent[]): ParsedSession {
+function makeSession(events: AnalysisEvent[], opts: { isSubAgent?: boolean } = {}): ParsedSession {
 	return {
 		header: HEADER,
 		events,
 		filePath: "/tmp/s.jsonl",
 		totalEntries: events.length,
 		malformedLines: 0,
+		isSubAgent: opts.isSubAgent ?? false,
 	};
 }
 
@@ -111,6 +112,43 @@ describe("renderMarkdown", () => {
 		});
 		expect(md).toContain("| **read : lsp** | 4.00 |");
 		expect(md).toContain("over-reading");
+	});
+
+	it("renders the efficiency table as two columns when aggregatedMain is supplied", () => {
+		// Two sessions, one main (4 reads / 1 lsp = 4.0) and one sub-agent
+		// (8 reads / 0 lsp = null). All-sessions ratio is also 4.0 here
+		// because lsp counts are equal, but the column structure must
+		// render whenever aggregatedMain is present.
+		const main = makeSession([tc("read"), tc("read"), tc("read"), tc("read"), tc("lsp")]);
+		const sub = makeSession([tc("read"), tc("read"), tc("read"), tc("read"), tc("read"), tc("read"), tc("read"), tc("read")], { isSubAgent: true });
+		const mMain = extractMetrics(main);
+		const mSub = extractMetrics(sub);
+		const all = aggregateMetrics([mMain, mSub], [main.events, sub.events]);
+		const mainOnly = aggregateMetrics([mMain], [main.events]);
+		const md = renderMarkdown({
+			generatedAt: FIXED_DATE,
+			sessionMetrics: [mMain, mSub],
+			aggregated: all,
+			aggregatedMain: mainOnly,
+			hitsBySession: new Map(),
+		});
+		expect(md).toContain("| Metric | Main sessions | All sessions |");
+		expect(md).toContain("main-session read:lsp"); // hint reflects main, not all
+	});
+
+	it("falls back to a single-column efficiency table when no sub-agents present", () => {
+		const main = makeSession([tc("read"), tc("read"), tc("lsp")]);
+		const m = extractMetrics(main);
+		const agg = aggregateMetrics([m], [main.events]);
+		const md = renderMarkdown({
+			generatedAt: FIXED_DATE,
+			sessionMetrics: [m],
+			aggregated: agg,
+			hitsBySession: new Map(),
+			// aggregatedMain intentionally omitted
+		});
+		expect(md).toContain("| Metric | Value |");
+		expect(md).not.toContain("Main sessions");
 	});
 
 	it("renders n/a for null ratios", () => {
@@ -336,6 +374,7 @@ describe("renderMarkdown", () => {
 			filePath: "/tmp/s.jsonl",
 			totalEntries: 0,
 			malformedLines: 3,
+			isSubAgent: false,
 		};
 		const m: SessionMetrics = extractMetrics(session);
 		const agg = aggregateMetrics([m], [session.events]);

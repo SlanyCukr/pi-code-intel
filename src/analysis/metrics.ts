@@ -33,6 +33,12 @@ export interface SessionMetrics {
 	toolCallsByName: Record<string, number>;
 	/** Tool name → count of tool_result events with isError: true. */
 	toolErrorsByName: Record<string, number>;
+	/**
+	 * Mirrors `ParsedSession.isSubAgent`. Lifted to the metrics layer so
+	 * downstream filters (main-only aggregation, renderer disclosures) can
+	 * partition without round-tripping through the parsed-sessions array.
+	 */
+	isSubAgent: boolean;
 }
 
 export interface AggregatedMetrics {
@@ -124,6 +130,7 @@ export function extractMetrics(session: ParsedSession): SessionMetrics {
 		branchSummaryCount,
 		toolCallsByName,
 		toolErrorsByName,
+		isSubAgent: session.isSubAgent,
 	};
 }
 

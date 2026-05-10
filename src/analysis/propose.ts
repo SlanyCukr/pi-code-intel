@@ -282,12 +282,34 @@ export async function generateProposals(
 
 function renderGroundingFooter(grounding: ProposalGrounding): string {
 	if (grounding.kind === "captured") {
-		return `*Grounded in the system prompt captured during session \`${grounding.sessionId.slice(0, 8)}\` at ${grounding.capturedAt}.*`;
+		const age = describeCaptureAge(grounding.capturedAt);
+		return [
+			`*Grounded in the system prompt captured during session \`${grounding.sessionId.slice(0, 8)}\` at ${grounding.capturedAt}${age ? ` (${age})` : ""}.*`,
+			"*If the prompt has been edited since this capture, some proposals may already be applied — verify against the current source before acting.*",
+		].join("\n");
 	}
 	if (grounding.kind === "source-fallback") {
 		return `*Grounded in the current source at \`${grounding.sourcePath}\` (no captures in analyzed sessions; proposals are forward-looking).*`;
 	}
 	return `*Grounding: ${grounding.reason}.*`;
+}
+
+/**
+ * Render a human-readable relative age like "22 hours ago" or "3 days ago"
+ * from an ISO timestamp. Returns null when the timestamp is unparseable
+ * (we surface only the absolute timestamp in that case).
+ */
+function describeCaptureAge(capturedAt: string, now: Date = new Date()): string | null {
+	const t = Date.parse(capturedAt);
+	if (!Number.isFinite(t)) return null;
+	const ageMs = now.getTime() - t;
+	if (ageMs < 0) return null; // future timestamp; suspicious but harmless
+	const ageMin = Math.round(ageMs / 60_000);
+	if (ageMin < 60) return `${ageMin} minute${ageMin === 1 ? "" : "s"} ago`;
+	const ageHr = Math.round(ageMs / 3_600_000);
+	if (ageHr < 48) return `${ageHr} hour${ageHr === 1 ? "" : "s"} ago`;
+	const ageDays = Math.round(ageMs / 86_400_000);
+	return `${ageDays} day${ageDays === 1 ? "" : "s"} ago`;
 }
 
 function errorBlock(reason: string): string {

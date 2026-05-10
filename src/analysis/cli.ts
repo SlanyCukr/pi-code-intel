@@ -158,6 +158,19 @@ export async function runAnalysis(
 		parsed.map((p) => p.events),
 	);
 
+	// Sub-agent activity skews aggregated ratios (sub-agent templates often
+	// omit `lsp` from their tool allowlist, inflating read:lsp). Compute a
+	// main-only aggregate so the report can disclose both side-by-side and
+	// the over-reading hint targets the right population.
+	const mainParsed = parsed.filter((p) => !p.isSubAgent);
+	const aggregatedMain =
+		mainParsed.length === parsed.length
+			? null // no sub-agents — main and all are identical
+			: aggregateMetrics(
+					mainParsed.map(extractMetrics),
+					mainParsed.map((p) => p.events),
+				);
+
 	let proposalsMarkdown: string | undefined;
 	if (args.propose) {
 		proposalsMarkdown = await generateProposals(
@@ -179,6 +192,7 @@ export async function runAnalysis(
 		generatedAt: new Date(),
 		sessionMetrics: perSession,
 		aggregated,
+		aggregatedMain: aggregatedMain ?? undefined,
 		hitsBySession,
 		outcomesBySession,
 		proposalsMarkdown,

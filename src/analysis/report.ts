@@ -34,6 +34,14 @@ export interface RenderInput {
 	 * always passes the parsed array so the sub-agent disclosure renders.
 	 */
 	parsedSessions?: ParsedSession[];
+	/**
+	 * Optional secondary aggregate computed over main sessions only
+	 * (excluding sub-agents). When present, section 2 renders both
+	 * columns and the over-reading hint targets the main ratio. Omitted
+	 * when no sub-agents were present (in which case `aggregated` already
+	 * represents main-only).
+	 */
+	aggregatedMain?: AggregatedMetrics;
 }
 
 /**
@@ -101,26 +109,77 @@ function renderSummary(input: RenderInput): string {
 }
 
 function renderEfficiency(input: RenderInput): string {
-	const { aggregated } = input;
+	const { aggregated, aggregatedMain } = input;
 	const lines: string[] = [];
 	lines.push("## 2. Efficiency");
 	lines.push("");
-	lines.push("| Metric | Value |");
-	lines.push("|---|---:|");
-	lines.push(`| read calls | ${aggregated.totalReads} |`);
-	lines.push(`| lsp calls | ${aggregated.totalLspCalls} |`);
-	lines.push(`| bash calls | ${aggregated.totalBashCalls} |`);
-	lines.push(`| bash classified as grep-like | ${aggregated.totalGrepCalls} |`);
-	lines.push(`| edit calls | ${aggregated.totalEdits} |`);
-	lines.push(`| **read : lsp** | ${formatRatio(aggregated.readLspRatio)} |`);
-	lines.push(`| **grep : lsp** | ${formatRatio(aggregated.grepLspRatio)} |`);
-	lines.push(`| **edit failure rate** | ${formatPercent(aggregated.editFailureRate)} |`);
-	lines.push(`| avg reads / session | ${aggregated.avgReadsPerSession.toFixed(1)} |`);
-	lines.push(`| avg tool calls / session | ${aggregated.avgToolCallsPerSession.toFixed(1)} |`);
+
+	// Two-column when sub-agents are present, since their tool budgets
+	// (especially the lsp omission in many sub-agent templates) skew the
+	// aggregated ratios away from what the main-agent prompt controls.
+	if (aggregatedMain) {
+		lines.push("| Metric | Main sessions | All sessions |");
+		lines.push("|---|---:|---:|");
+		const row = (label: string, main: string, all: string) =>
+			lines.push(`| ${label} | ${main} | ${all} |`);
+		row("read calls", `${aggregatedMain.totalReads}`, `${aggregated.totalReads}`);
+		row("lsp calls", `${aggregatedMain.totalLspCalls}`, `${aggregated.totalLspCalls}`);
+		row("bash calls", `${aggregatedMain.totalBashCalls}`, `${aggregated.totalBashCalls}`);
+		row(
+			"bash classified as grep-like",
+			`${aggregatedMain.totalGrepCalls}`,
+			`${aggregated.totalGrepCalls}`,
+		);
+		row("edit calls", `${aggregatedMain.totalEdits}`, `${aggregated.totalEdits}`);
+		row(
+			"**read : lsp**",
+			formatRatio(aggregatedMain.readLspRatio),
+			formatRatio(aggregated.readLspRatio),
+		);
+		row(
+			"**grep : lsp**",
+			formatRatio(aggregatedMain.grepLspRatio),
+			formatRatio(aggregated.grepLspRatio),
+		);
+		row(
+			"**edit failure rate**",
+			formatPercent(aggregatedMain.editFailureRate),
+			formatPercent(aggregated.editFailureRate),
+		);
+		row(
+			"avg reads / session",
+			aggregatedMain.avgReadsPerSession.toFixed(1),
+			aggregated.avgReadsPerSession.toFixed(1),
+		);
+		row(
+			"avg tool calls / session",
+			aggregatedMain.avgToolCallsPerSession.toFixed(1),
+			aggregated.avgToolCallsPerSession.toFixed(1),
+		);
+	} else {
+		lines.push("| Metric | Value |");
+		lines.push("|---|---:|");
+		lines.push(`| read calls | ${aggregated.totalReads} |`);
+		lines.push(`| lsp calls | ${aggregated.totalLspCalls} |`);
+		lines.push(`| bash calls | ${aggregated.totalBashCalls} |`);
+		lines.push(`| bash classified as grep-like | ${aggregated.totalGrepCalls} |`);
+		lines.push(`| edit calls | ${aggregated.totalEdits} |`);
+		lines.push(`| **read : lsp** | ${formatRatio(aggregated.readLspRatio)} |`);
+		lines.push(`| **grep : lsp** | ${formatRatio(aggregated.grepLspRatio)} |`);
+		lines.push(`| **edit failure rate** | ${formatPercent(aggregated.editFailureRate)} |`);
+		lines.push(`| avg reads / session | ${aggregated.avgReadsPerSession.toFixed(1)} |`);
+		lines.push(`| avg tool calls / session | ${aggregated.avgToolCallsPerSession.toFixed(1)} |`);
+	}
 	lines.push("");
-	if (aggregated.readLspRatio !== null && aggregated.readLspRatio > 1.5) {
+
+	// The over-reading hint targets system-prompt amendments, so it must
+	// reflect main-session behavior — sub-agent ratios are governed by
+	// per-template prompts, not the main system prompt.
+	const hintRatio = aggregatedMain?.readLspRatio ?? aggregated.readLspRatio;
+	if (hintRatio !== null && hintRatio > 1.5) {
+		const scope = aggregatedMain ? "main-session read:lsp" : "read:lsp";
 		lines.push(
-			`> read:lsp = ${aggregated.readLspRatio.toFixed(2)} suggests over-reading. Consider tightening the system-prompt rule that ` +
+			`> ${scope} = ${hintRatio.toFixed(2)} suggests over-reading. Consider tightening the system-prompt rule that ` +
 				`directs the agent to prefer LSP for symbol/structure queries.`,
 		);
 		lines.push("");

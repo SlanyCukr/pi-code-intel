@@ -259,6 +259,42 @@ describe("generateProposals", () => {
 		expect(fakeSession.dispose).toHaveBeenCalled();
 	});
 
+	it("captured-grounding footer includes a relative age and a stale-grounding caveat", async () => {
+		// Documents the stale-grounding visibility fix: section-5 readers
+		// need to know the capture is N hours old AND that proposals may
+		// already be applied if the prompt has moved since.
+		const fakeSession = {
+			agent: { setSystemPrompt: vi.fn() },
+			messages: [
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "## Proposed amendments\n\n- noop" }],
+				},
+			],
+			prompt: vi.fn(async () => undefined),
+			abort: vi.fn(async () => undefined),
+			dispose: vi.fn(),
+		};
+		mockCreateSession.mockResolvedValueOnce({ session: fakeSession } as any);
+
+		// Capture from "yesterday" relative to test runtime — exact string
+		// for ago-render is checked via regex (minutes/hours/days unit varies).
+		const yesterday = new Date(Date.now() - 24 * 3600_000).toISOString();
+		const session = makeSession([captureEvent("captured prompt", yesterday)]);
+		const result = await generateProposals(
+			{
+				aggregated: aggregateMetrics([], []),
+				sessionMetrics: [],
+				hitsBySession: new Map(),
+				parsedSessions: [session],
+				systemPromptSourcePath: join(tmp, "anything.ts"),
+			},
+			{ cwd: tmp },
+		);
+		expect(result).toMatch(/\((?:\d+) (?:minutes?|hours?|days?) ago\)/);
+		expect(result).toContain("If the prompt has been edited since this capture");
+	});
+
 	it("returns a forward-looking footer when using source fallback", async () => {
 		const sourcePath = join(tmp, "system-prompt.ts");
 		writeFileSync(sourcePath, "the source", "utf-8");
