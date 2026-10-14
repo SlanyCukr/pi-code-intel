@@ -27,16 +27,17 @@
 		"test:foreign": "npm run build && node --experimental-strip-types scripts/foreign-install-test.ts"
 	},
 	"dependencies": {
-		"@sinclair/typebox": "^0.34.0",
 		"turndown": "^7.2.2"
 	},
 	"peerDependencies": {
 		"@mariozechner/pi-agent-core": ">=0.62.0",
-		"@mariozechner/pi-coding-agent": ">=0.62.0"
+		"@mariozechner/pi-coding-agent": ">=0.62.0",
+		"@sinclair/typebox": "*"
 	},
 	"devDependencies": {
 		"@mariozechner/pi-agent-core": "^0.62.0",
 		"@mariozechner/pi-coding-agent": "^0.62.0",
+		"@sinclair/typebox": "^0.34.0",
 		"@types/node": "^22.0.0",
 		"@types/turndown": "^5.0.6",
 		"typescript": "^5.7.3",
